@@ -18,4 +18,5 @@
 - [Files and locations](locations.md)
 - [Traces and transcripts](traces.md)
 - [Benchmark mode](benchmark.md)
+- [Research controls](research.md)
 - [Changelog](changelog.md)

@@ -55,3 +55,34 @@ The transcript is one self-contained HTML file. It shows the provider input,
 reasoning, replies, tool effects, runtime decisions, and context measurements as
 one timeline. Give it trace files or directories. It finds the Microgentic
 traces in them and ignores other JSONL files.
+
+## Context and tool-call evidence
+
+Every worker provider call has a compact context ledger and an exact ordered
+request snapshot. `analyze-trace` reports the snapshot count and whether
+coverage is complete, so you can spot legacy or truncated traces before you
+draw conclusions about context.
+
+Response-side tool-call coverage is measured separately from request coverage.
+`analyze-trace` reports batch count, aggregate and normalized call counts,
+largest batch, bounded-argument truncations, and whether per-call response
+evidence is complete. Stream progress counts remain progress evidence only;
+they never create executable calls.
+
+Every successful read of an unchanged file is rendered as one authoritative,
+event-sourced projection in provider context. Version-three projections put
+the content in a line-numbered text view (`1|content`) and explicitly report
+whether it is `complete` or `partial`; partial projections name exact missing
+ranges. Later reads update that same path-and-mutation-epoch view instead of
+adding another provider-visible read result. The content bound scales with the
+actual provider window and is capped, while raw read events remain unchanged in
+the trace only. Read-only shell effects do not split a file epoch, but confirmed
+workspace mutations do.
+
+## Independent verification
+
+Independent verification is optional and harness-neutral. Supply a
+`transcript_evidence.v1` JSON file with `--evidence`; entries match sessions by
+canonical trace path or transcript label. Replicate directories shaped like
+`rNN-<arm>` supply stable labels for arbitrary arm names. The complete schema
+and fidelity rules are documented in [`TRACE_SCHEMA.md`](TRACE_SCHEMA.md).
