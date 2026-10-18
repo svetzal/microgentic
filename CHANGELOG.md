@@ -10,6 +10,14 @@ The release workflow publishes each version's section as its GitHub release note
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-17
+
+Every run now says how it ended and what it did. The runtime decides a typed
+outcome, `microgentic run` exits with it, and the summary lists the files the
+run changed and the checks it ran. Traces gain the model's discovered context
+window, time to first token, and context residency. The conversation ends with
+its terminal and on `kill`. Benchmark mode's provider requests are unchanged.
+
 ### Added
 
 - One typed outcome for every run, decided by the runtime rather than by the
@@ -250,7 +258,8 @@ experimental harness into a small terminal interface for everyday use.
 - A successful process exit still needs inspection of the native terminal
   result when classifying benchmark outcomes.
 
-[Unreleased]: https://github.com/svetzal/microgentic/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/svetzal/microgentic/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/svetzal/microgentic/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/svetzal/microgentic/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/svetzal/microgentic/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/svetzal/microgentic/compare/v0.1.0...v0.2.0
