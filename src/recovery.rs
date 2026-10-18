@@ -1099,9 +1099,11 @@ impl<G: RecoveryProvider> LlmGateway for WorkerGateway<G> {
                             Some(RecoveryStreamEvent::Progress { progress, .. }) => {
                                 ready.push_back(Ok(StreamChunk::Progress(progress)))
                             }
-                            Some(RecoveryStreamEvent::Metrics { metrics, .. }) => {
-                                ready.push_back(Ok(StreamChunk::Metrics(metrics)))
-                            }
+                            // Raw provider metrics carry no client timing. The
+                            // completion's report repeats them with Mojentic's
+                            // timing, so that is the one Metrics chunk forwarded,
+                            // as Mojentic's own legacy adapter does.
+                            Some(RecoveryStreamEvent::Metrics { .. }) => {}
                             Some(RecoveryStreamEvent::ToolFragment(value)) => {
                                 if !contaminated
                                     && filter
@@ -1117,6 +1119,7 @@ impl<G: RecoveryProvider> LlmGateway for WorkerGateway<G> {
                             }
                             Some(RecoveryStreamEvent::Completed(response)) => {
                                 done = true;
+                                let metrics = response.report.stream_metrics.clone();
                                 let mut tool_json =
                                     serde_json::to_value(&response.value.tool_calls)
                                         .unwrap_or(Value::Null);
@@ -1131,6 +1134,8 @@ impl<G: RecoveryProvider> LlmGateway for WorkerGateway<G> {
                                     || cancellation.is_cancelled()
                                 {
                                     evidence.event("llm.recovery.final_failure", json!({"outcome": if contaminated { "interrupted" } else if cancellation.is_cancelled() { "cancelled" } else { "observer_failed" }, "report": response.report, "credential_redacted": contaminated}));
+                                    // No metrics for a rejected completion: the agent
+                                    // must read the rejection, not a no-content stop.
                                     ready.push_back(Err(
                                         mojentic::error::MojenticError::GatewayError(
                                             "safe worker completion rejected".into(),
@@ -1138,6 +1143,9 @@ impl<G: RecoveryProvider> LlmGateway for WorkerGateway<G> {
                                     ));
                                 } else {
                                     ready.extend(filter.release(usize::MAX).into_iter().map(Ok));
+                                    ready.extend(
+                                        metrics.map(|metrics| Ok(StreamChunk::Metrics(*metrics))),
+                                    );
                                     if !response.value.tool_calls.is_empty() {
                                         ready.push_back(Ok(StreamChunk::ToolCalls(
                                             response.value.tool_calls,
@@ -1167,6 +1175,12 @@ impl<G: RecoveryProvider> LlmGateway for WorkerGateway<G> {
                                     );
                                 }
                                 // A possible credential prefix is withheld even on interruption.
+                                ready.extend(
+                                    error
+                                        .stream_metrics
+                                        .clone()
+                                        .map(|metrics| Ok(StreamChunk::Metrics(*metrics))),
+                                );
                                 ready.push_back(Err(mojentic::error::MojenticError::Recovery(
                                     Box::new(error),
                                 )));

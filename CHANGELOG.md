@@ -21,6 +21,15 @@ The release workflow publishes each version's section as its GitHub release note
   otherwise the advertised maximum with Mojentic's field path
   (`max_model_len` on oMLX, `model_info.<arch>.context_length` on Ollama).
   Only `discovery_error` wording changes, to Mojentic's gateway error text.
+- The first-token clock moved into Mojentic. `llm.context_assembly.response`
+  takes `time_to_first_token_ms`, `first_token_kind` and
+  `request_duration_ms` from the client timing on the completion's terminal
+  `StreamMetrics`, and `src/first_token.rs` is gone. The recovery stream shim
+  forwards the completion report's metrics, which carry that timing, as the
+  one `Metrics` chunk per completion, as Mojentic's own adapter does. The
+  three fields are `null` when a stream ended before its terminal metrics,
+  such as a stream Microgentic interrupted; `TRACE_SCHEMA.md` describes the
+  measurement.
 - Microgentic now depends on the published Mojentic 3.0 crate from crates.io
   instead of a pinned Git revision, so dependency maintenance can see when it
   falls behind. Mojentic 3.0 sends a request control only when the caller sets
