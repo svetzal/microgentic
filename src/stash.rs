@@ -81,6 +81,16 @@ impl Comparison {
             || !self.removed_baseline_object_ids.is_empty()
     }
 
+    /// One line saying what differs, for the run outcome.
+    pub fn summary(&self) -> String {
+        format!(
+            "new stash object IDs: {:?}; missing baseline stash object IDs: {:?}; inventory unknown or repository changed: {}",
+            self.added_object_ids,
+            self.removed_baseline_object_ids,
+            self.inventory_unknown_or_repository_changed
+        )
+    }
+
     pub fn prompt(&self) -> String {
         format!(
             "DONE withheld: Git stash state differs from entry or cannot be verified. New unresolved stash object IDs: {:?}. Missing baseline stash object IDs: {:?}. Inventory unknown/repository changed: {}. Compare the current workspace with the entry inventory. Resolve new stashes explicitly and validate the actual working tree before DONE. Do not automatically pop/drop pre-existing stashes or discard work. If ownership or restoration is unclear, report FAIL. Stashes appeared during this run; shared-repository attribution is uncertain.",

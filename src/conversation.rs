@@ -10,10 +10,7 @@ use serde_json::{Value, json};
 use std::collections::HashSet;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{
-    Arc, Mutex,
-    atomic::{AtomicBool, Ordering},
-};
+use std::sync::{Arc, Mutex};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 
@@ -100,7 +97,6 @@ pub(crate) struct ConversationRun {
     protected_users: usize,
     events: UnboundedSender<ConversationEvent>,
     pub(crate) omitted_exchanges: usize,
-    reply_completed: AtomicBool,
     requests: Mutex<RequestTracking>,
 }
 
@@ -228,7 +224,6 @@ impl ConversationRun {
             protected_users,
             events,
             omitted_exchanges,
-            reply_completed: AtomicBool::new(false),
             requests,
         })
     }
@@ -284,10 +279,6 @@ impl ConversationRun {
 
     pub(crate) fn protected_users(&self) -> usize {
         self.protected_users
-    }
-
-    pub(crate) fn complete_reply(&self) {
-        self.reply_completed.store(true, Ordering::Relaxed);
     }
 
     pub(crate) fn initial_messages(&self, system: String, mut task: String) -> Vec<LlmMessage> {
@@ -597,16 +588,11 @@ pub(crate) async fn run_worker(
     let result: Result<AgentRunSummary> =
         crate::agent::run_agent_in_conversation(config, conversation.clone()).await;
     let error = result.as_ref().err().map(|e| format!("{e:#}"));
+    // A run that ended without finishing its work leaves the runtime's own
+    // account of why for the next request.
     let continuity_warning = error.clone().or_else(|| {
         result.as_ref().ok().and_then(|summary| {
-            (!conversation.reply_completed.load(Ordering::Relaxed)
-                && crate::runtime::terminal_token(&summary.final_summary).is_none())
-            .then(|| {
-                format!(
-                    "runtime returned without a terminal task status: {}",
-                    summary.final_summary
-                )
-            })
+            (!summary.outcome.is_success()).then(|| summary.outcome.to_string())
         })
     });
     let saved = conversation.save(&path, continuity_warning);
@@ -735,7 +721,6 @@ mod tests {
             protected_users,
             events,
             omitted_exchanges: 0,
-            reply_completed: AtomicBool::new(false),
             requests: Mutex::default(),
         }
     }

@@ -1,7 +1,8 @@
 //! `microgentic run` ends on a termination signal. The model request is
 //! cancelled, a project command that is still running is killed with its
-//! process group, and the process exits with an error instead of waiting
-//! for work that nothing will finish.
+//! process group, and the process exits with the shell's status for that
+//! signal (128 + its number) instead of waiting for work that nothing will
+//! finish.
 #![cfg(unix)]
 
 mod support;
@@ -115,9 +116,14 @@ fn run_stops_while_the_model_is_answering(wire: Wire, signal_number: i32) {
         .unwrap_or_else(|| panic!("signal {signal_number} did not end the run"));
     hold.open();
     let stderr = stderr_of(child);
-    assert_eq!(status.code(), Some(1), "{stderr}");
+    assert_eq!(status.code(), Some(128 + signal_number), "{stderr}");
+    let name = match signal_number {
+        libc::SIGTERM => "SIGTERM",
+        libc::SIGHUP => "SIGHUP",
+        _ => "SIGINT",
+    };
     assert!(
-        stderr.contains("Cancelled"),
+        stderr.contains(&format!("cancelled by {name}")),
         "the run did not report its cancellation: {stderr}"
     );
 }
@@ -247,5 +253,5 @@ fn run_started_under_nohup_keeps_ignoring_sighup() {
     let status =
         exit_within(&mut child, Duration::from_secs(3)).expect("SIGTERM did not end the run");
     hold.open();
-    assert_eq!(status.code(), Some(1), "{}", stderr_of(child));
+    assert_eq!(status.code(), Some(143), "{}", stderr_of(child));
 }

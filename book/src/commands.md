@@ -45,6 +45,30 @@ See [Benchmark mode](benchmark.md).
 
 ## Exit status
 
-A usage error exits with 2. Other errors exit with 1. A `run` that finishes
-exits with 0, even when the task is incomplete. Typed outcomes and exit codes
-for task results are planned.
+`microgentic run` reports how the run ended in its exit status. The same
+outcome is the `outcome` field of the `--json` summary and, when the run did
+not succeed, one `microgentic:` line on stderr.
+
+| Code | Outcome | Meaning |
+| --- | --- | --- |
+| 0 | `replied`, `done` | An everyday reply finished, or the runtime accepted a task's `DONE` |
+| 1 | `error` | A provider, environment, or internal error. The run has no summary |
+| 2 | `usage` | Bad command-line input. Nothing ran |
+| 3 | `failed` | The model returned `FAIL` |
+| 4 | `withheld` | The model claimed completion, a gate withheld it, and the iteration budget ran out. The gate is `stash`, `validation`, `probes`, or `acceptance_ledger` |
+| 5 | `hard_stop` | A runtime rule stopped the run. The cause is `action_boundary`, `thinking_only`, `empty_response`, `repair_no_action`, `repair_depth`, `inspection_loop`, `no_content_stream`, or `iteration_budget` |
+| 128 + signal | `cancelled` | A termination signal ended the run: 130 for SIGINT, 143 for SIGTERM, 129 for SIGHUP |
+
+A `DONE` from the model does not set exit 0 on its own. The runtime's gates
+accept it, and only then is the outcome `done`. Exit 0 says the harness
+finished cleanly. It does not say an independent verifier passed.
+
+`microgentic benchmark run`, `benchmark run-sequential`, `run-sequential`, and
+the `adaptive-agent-harness` executable keep their earlier behaviour: 0 when
+they produce a summary, 1 on an error. Their JSON summaries carry the same
+`outcome` field, and so does each attempt record of a sequential run, so an
+adapter reads the outcome from the summary or from the trace's `run.finished`
+event instead of the exit status. See [Benchmark mode](benchmark.md).
+
+Every other command exits with 0 when it succeeds, 1 on an error, and 2 on a
+usage error.

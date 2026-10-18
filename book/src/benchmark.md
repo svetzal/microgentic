@@ -28,11 +28,17 @@ microgentic benchmark run-sequential --experiment ./cell \
   work is complete. The model's claim alone does not.
 - The default provider is oMLX. Benchmark adapters choose their provider
   explicitly. Server addresses and credentials still come from the environment.
+- The exit status is 0 whenever a summary was produced and 1 on an error, as
+  before. The summary's `outcome` field carries the typed outcome (`done`,
+  `failed`, `withheld`, or `hard_stop`), and so does the trace's
+  `run.finished` event. Read it there instead of the exit status. See
+  [Commands](commands.md#exit-status).
 
 Each run starts with fresh task context. Sequential attempts keep their declared
 artifact through the retry policy.
 
 ## Compatibility executable
 
-The `adaptive-agent-harness` executable keeps the old flags and JSON output for
-existing experiment scripts. Its library is still `adaptive_agent_harness`.
+The `adaptive-agent-harness` executable keeps the old flags, JSON output, and
+exit status (0 on a summary, 1 on an error) for existing experiment scripts.
+Its library is still `adaptive_agent_harness`.

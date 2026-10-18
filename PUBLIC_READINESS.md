@@ -88,22 +88,36 @@ Rapid attempts sharing a trace directory can therefore fail before work starts.
 - [ ] Create unique trace filenames without sleeps or overwriting prior evidence.
   Test rapid and concurrent creation in one directory. Remove sequential-fixture
   pacing.
-- [ ] Add a typed terminal outcome at the runtime boundary. Distinguish a completed
+- [x] Add a typed terminal outcome at the runtime boundary. Distinguish a completed
   reply, verified task completion, incomplete work, provider/environment failure,
   and cancellation. Use recorded runtime decisions and executor results;
   a model's prose must not establish successful checks.
+  Note: `outcome::RunOutcome` (2026-10-17) is set where the runtime breaks the
+  loop: `replied`, `done`, `failed`, `withheld` by a named gate when the
+  iteration budget ends after a rejected claim, `hard_stop` with its cause,
+  plus `cancelled`, `error`, and `usage` for runs without a summary.
 - [ ] Present the same outcome in plain output, JSON, and the TUI. Report changed
   paths, check results, checks not run, stop reason, and evidence location when
   relevant. Describe changes relative to the starting workspace, including
   pre-existing edits.
   An ordinary chat reply needs neither a task scorecard nor an evidence footer.
-- [ ] Map public `run` outcomes to documented exit codes. Exercise returned `FAIL`,
+  Progress: the outcome, stop reason, and trace location reach stderr, the
+  `--json` summary's `outcome` field, and the conversation view's closing line
+  and `Stopped` status; a successful reply adds nothing. Changed paths and
+  check results are not reported yet.
+- [x] Map public `run` outcomes to documented exit codes. Exercise returned `FAIL`,
   provider failure, exhausted budgets, unchecked completion, and cancellation
   through the installed binary. Check redirected stdout and stderr separately.
+  Note: the table is in the book's Commands page. Scripted-gateway tests cover
+  each code through the built binary with stdout and stderr captured
+  separately; the installed-binary smoke test still checks only `DONE`.
 - [ ] Preserve benchmark task behavior and existing summary fields. Treat any
   benchmark exit-code change as an explicit adapter migration with reader tests.
   Compare resolved requests, controls, and terminal evidence with deterministic
   fixtures.
+  Progress: benchmark and compatibility exits are unchanged, and the
+  continuity test holds requests, ledgers, and existing summary fields fixed
+  while allowing the one additive `outcome` key.
 
 Start with trace uniqueness as a separate small commit, then implement the shared
 outcome. Streaming JSONL and downstream cancellation follow once terminal results
@@ -361,6 +375,10 @@ the first public alpha usable; P2 extends it after core workflows work.
 - [ ] **Define typed outcomes.** Share one outcome between runtime, CLI, JSON,
   TUI, and exit status. Include checks passed/failed/not run, changed paths,
   stop reason, and evidence location. Test returned `FAIL` as well as errors.
+  Progress: one `RunOutcome` is shared by the runtime, `run`, `--json`, the
+  conversation view, and the exit status, with stop reason and evidence
+  location, and returned `FAIL` is tested beside errors (section 1 above).
+  Checks passed/failed/not run and changed paths remain.
 - [ ] **Budget interface overhead.** Establish startup/help latency, installation
   size, idle memory, and input/render responsiveness baselines; set explicit
   release budgets from those measurements. Keep model/tool timing separate and
@@ -415,6 +433,9 @@ identified by source review, not newly executed benchmark results.
   terminal status, with trace evidence for diagnosis. Distinguish incomplete work,
   provider failure, environment failure, cancellation, and verified success.
   Preserve batch-stop rules and independent verifier authority.
+  Progress: the benchmark summary and the `run.finished` trace event now carry
+  the typed `outcome`; the adapters still classify from `run.failed` records
+  and `final_summary` text.
 - [ ] **Prove equivalent resolved runs.** Compare old/new intake and effective
   contracts, model controls, context packets, tool/probe exposure, permissions,
   and stop policies using deterministic fixtures and scripted gateways. Inspect

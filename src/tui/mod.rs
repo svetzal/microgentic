@@ -515,7 +515,7 @@ pub async fn run(config: Option<PathBuf>) -> Result<()> {
     // conversation allows it a little longer before giving up on it.
     let signal = crate::signals::on_termination(
         crate::signals::GRACE + Duration::from_secs(1),
-        move || requested_exit.store(true, Ordering::Relaxed),
+        move |_signal| requested_exit.store(true, Ordering::Relaxed),
         |signal| {
             Screen::restore();
             // The terminal may already be gone, so a failed write must not
@@ -875,6 +875,13 @@ fn apply_event(view: &mut View, run: &mut ActiveRun, event: ConversationEvent) {
                 view.history
                     .push(Role::Plain, &format!("Result: {final_summary}\n"));
             }
+            // A run that did not finish its work says why, in the runtime's
+            // words; an ordinary reply needs no scorecard.
+            let unfinished = unfinished_outcome(&summary);
+            if let Some(outcome) = &unfinished {
+                view.history.start_line();
+                view.history.push(Role::Error, &format!("{outcome}\n"));
+            }
             // Trace visibility follows this exchange's actual work, never its
             // wording or tool history retained from an earlier prompt.
             if run.used_project_tools {
@@ -886,7 +893,11 @@ fn apply_event(view: &mut View, run: &mut ActiveRun, event: ConversationEvent) {
                     &format!("Evidence: {}\n", home_relative(trace, home.as_deref())),
                 );
             }
-            view.status = ready_for_next();
+            view.status = if unfinished.is_some() {
+                stopped()
+            } else {
+                ready_for_next()
+            };
             run.terminal_reported = true;
         }
         ConversationEvent::Failed { message } => {
@@ -901,6 +912,14 @@ fn apply_event(view: &mut View, run: &mut ActiveRun, event: ConversationEvent) {
             run.terminal_reported = true;
         }
     }
+}
+
+/// The run outcome in a finished worker's summary, when the run did not
+/// finish its work. A summary without a readable outcome counts as finished.
+fn unfinished_outcome(summary: &serde_json::Value) -> Option<crate::outcome::RunOutcome> {
+    serde_json::from_value::<crate::outcome::RunOutcome>(summary["outcome"].clone())
+        .ok()
+        .filter(|outcome| !outcome.is_success())
 }
 
 fn interrupt(run: &mut ActiveRun) {
@@ -1051,6 +1070,74 @@ mod tests {
             "{text}"
         );
         assert!(!text.contains("Using") && !text.contains("finished"));
+    }
+
+    /// A run that did not finish its work says why under the reply and
+    /// stops; a finished reply, with or without an outcome field, is just
+    /// ready for the next message.
+    #[tokio::test]
+    async fn an_unfinished_outcome_is_shown_and_stops_the_status() {
+        let mut withheld = view();
+        let mut withheld_run = placeholder_run();
+        for event in [
+            ConversationEvent::ReplyStarted,
+            ConversationEvent::Content {
+                text: "DONE".into(),
+            },
+            ConversationEvent::Finished {
+                summary: serde_json::json!({
+                    "final_summary": "DONE",
+                    "trace_file": "t.jsonl",
+                    "outcome": {
+                        "kind": "withheld",
+                        "gate": "validation",
+                        "detail": "edits were not validated before the reply",
+                    },
+                }),
+            },
+        ] {
+            apply_event(&mut withheld, &mut withheld_run, event);
+        }
+        let text = history_text(&withheld);
+        assert!(
+            text.ends_with(
+                "DONE\ncompletion withheld by the validation gate: edits were not validated before the reply\n"
+            ),
+            "{text}"
+        );
+        assert_eq!(
+            rows_text(&wrap(&withheld.status.line(), 80)),
+            ["● Stopped. You can follow up or Esc to quit."]
+        );
+
+        for outcome in [
+            serde_json::json!({"kind": "replied"}),
+            serde_json::Value::Null,
+        ] {
+            let mut view = view();
+            let mut run = placeholder_run();
+            for event in [
+                ConversationEvent::ReplyStarted,
+                ConversationEvent::Content {
+                    text: "Hello.".into(),
+                },
+                ConversationEvent::Finished {
+                    summary: serde_json::json!({
+                        "final_summary": "Hello.",
+                        "trace_file": "t.jsonl",
+                        "outcome": outcome,
+                    }),
+                },
+            ] {
+                apply_event(&mut view, &mut run, event);
+            }
+            let text = history_text(&view);
+            assert!(text.ends_with("Microgentic: Hello."), "{text}");
+            assert_eq!(
+                rows_text(&wrap(&view.status.line(), 80)),
+                ["● Ready for your next message. Esc to quit."]
+            );
+        }
     }
 
     fn tool(id: &str, name: &str, arguments: serde_json::Value) -> ConversationEvent {

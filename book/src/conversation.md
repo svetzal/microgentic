@@ -190,6 +190,21 @@ The panel only shows what was sent. It does not change the request.
 Microgentic builds it from the exact request it records in the trace, with
 credentials removed and long text shortened.
 
+## How an exchange ends
+
+An ordinary exchange ends when the reply finishes. Nothing is added after it.
+
+When the runtime ends an exchange without a completed reply, the exchange ends
+with one line that names the outcome, and the status bar says `Stopped`:
+
+- the model returned `FAIL`: `FAIL returned: …`
+- a gate withheld the claimed completion: `completion withheld by the
+  validation gate: …`
+- a runtime rule stopped the run: `stopped by the runtime (empty response): …`
+
+These are the same outcomes that `run` reports in its exit status. See
+[Commands](commands.md#exit-status).
+
 ## Evidence
 
 When an exchange uses project tools, the reply ends with an `Evidence:` line.

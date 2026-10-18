@@ -12,6 +12,7 @@ use crate::agent::{
 };
 use crate::baseline::{load_matrix_baseline, summarize_matrix};
 use crate::contract::{Budgets, ContractSource, resolve_contract};
+use crate::outcome::RunOutcome;
 use crate::retry::{SequentialRunConfig, run_sequential};
 use crate::trace_analysis::analyze_trace;
 use crate::transcript::{RenderTranscriptConfig, render_transcript};
@@ -19,6 +20,7 @@ use anyhow::{Context, Result, bail};
 use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand};
 use std::io::{IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
+use std::process::ExitCode;
 
 const DEFAULT_MODEL: &str = "Qwen3.8-27B-MLX-8bit";
 
@@ -894,7 +896,12 @@ struct SetupArgs {
 }
 
 /// Shared application boundary for the public and compatibility executables.
-pub async fn main_entry(legacy: bool) -> Result<()> {
+///
+/// An error prints as `Error: {error:?}`, as `anyhow` would print it from
+/// `main`. The public executable's status then follows the run outcome the
+/// error carries (`RunOutcome::exit_code`), or 1 when it carries none; the
+/// compatibility executable always ends with 1.
+pub async fn main_entry(legacy: bool) -> ExitCode {
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .with_ansi(std::io::stderr().is_terminal() && std::env::var_os("NO_COLOR").is_none())
@@ -903,20 +910,37 @@ pub async fn main_entry(legacy: bool) -> Result<()> {
                 .unwrap_or_else(|_| "adaptive_agent_harness=info".into()),
         )
         .init();
-    dispatch(legacy).await
+    match dispatch(legacy).await {
+        Ok(code) => code,
+        Err(error) => {
+            // Standard error may be gone; a failed write must not panic here.
+            let _ = writeln!(std::io::stderr().lock(), "Error: {error:?}");
+            if legacy {
+                ExitCode::from(1)
+            } else {
+                ExitCode::from(
+                    error
+                        .downcast_ref::<RunOutcome>()
+                        .map(RunOutcome::exit_code)
+                        .unwrap_or(1),
+                )
+            }
+        }
+    }
 }
 
-pub async fn run() -> Result<()> {
+pub async fn run() -> Result<ExitCode> {
     dispatch(false).await
 }
 
-async fn dispatch(legacy: bool) -> Result<()> {
+async fn dispatch(legacy: bool) -> Result<ExitCode> {
     let cli = Cli::from_arg_matches(&command_definition().get_matches())?;
     let Some(command) = cli.command else {
         if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
             bail!("interactive mode needs a terminal; try: echo 'Hello!' | microgentic run");
         }
-        return crate::tui::run(cli.config).await;
+        crate::tui::run(cli.config).await?;
+        return Ok(ExitCode::SUCCESS);
     };
     match command {
         Command::Setup(args) => setup(args, cli.config.as_deref())?,
@@ -937,6 +961,19 @@ async fn dispatch(legacy: bool) -> Result<()> {
                 plain_reply(&summary.final_summary).to_owned()
             };
             writeln!(std::io::stdout().lock(), "{output}")?;
+            // The compatibility executable keeps its historical status; the
+            // public one says on standard error how a run ended when it did
+            // not finish its work, and exits accordingly.
+            if !legacy && !summary.outcome.is_success() {
+                crate::trace::end_open_stderr_line();
+                writeln!(
+                    std::io::stderr().lock(),
+                    "microgentic: {}; evidence: {}",
+                    summary.outcome,
+                    summary.trace_file.display()
+                )?;
+                return Ok(ExitCode::from(summary.outcome.exit_code()));
+            }
         }
         Command::ConversationWorker { run, session_state } => {
             if run.experiment.is_some() || run.goal.is_some() || run.contract.is_some() {
@@ -1108,7 +1145,14 @@ async fn dispatch(legacy: bool) -> Result<()> {
             println!("{}", serde_json::to_string_pretty(&summary)?);
         }
     }
-    Ok(())
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Bad command-line input, which the public executable reports with status 2.
+fn usage_error(message: &str) -> anyhow::Error {
+    anyhow::Error::new(RunOutcome::Usage {
+        message: message.to_string(),
+    })
 }
 
 /// The reply without surrounding blank lines or trailing whitespace. Leading
@@ -1139,7 +1183,7 @@ fn prompt_text(explicit: Option<String>, input: Option<String>) -> Result<String
     let prompt = match (explicit, input) {
         (Some(prompt), reference) => {
             if prompt.trim().is_empty() {
-                bail!("--prompt must not be empty");
+                return Err(usage_error("--prompt must not be empty"));
             }
             match reference.filter(|text| !text.trim().is_empty()) {
                 Some(reference) => format!(
@@ -1149,12 +1193,16 @@ fn prompt_text(explicit: Option<String>, input: Option<String>) -> Result<String
             }
         }
         (None, Some(prompt)) => prompt,
-        (None, None) => bail!(
-            "run requires a prompt; try microgentic run --prompt 'Hello!' or echo 'Hello!' | microgentic run"
-        ),
+        (None, None) => {
+            return Err(usage_error(
+                "run requires a prompt; try microgentic run --prompt 'Hello!' or echo 'Hello!' | microgentic run",
+            ));
+        }
     };
     if prompt.trim().is_empty() {
-        bail!("run requires a nonempty prompt through stdin or --prompt");
+        return Err(usage_error(
+            "run requires a nonempty prompt through stdin or --prompt",
+        ));
     }
     Ok(prompt)
 }
@@ -1237,7 +1285,7 @@ fn prepare_run_with_mode(
         .canonicalize()
         .context("opening --dir project directory")?;
     if !root.is_dir() {
-        bail!("--dir must name a project directory");
+        return Err(usage_error("--dir must name a project directory"));
     }
     let advanced = run.experiment.is_some() || run.goal.is_some() || run.contract.is_some();
     // Everyday runs and the conversation reply naturally, with the calculator

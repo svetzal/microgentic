@@ -5,6 +5,7 @@ use serde_json::{Value, json};
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 #[derive(Debug)]
@@ -150,7 +151,22 @@ impl TraceRecorder {
                 .emit(crate::conversation::ConversationEvent::Content { text: text.into() });
         } else {
             eprint!("{text}");
+            if let Some(last) = text.chars().last() {
+                STDERR_MID_LINE.store(last != '\n', Ordering::Relaxed);
+            }
         }
+    }
+}
+
+/// Whether streamed model text has left standard error in the middle of a
+/// line. Standard error is one process-wide stream, so this is too.
+static STDERR_MID_LINE: AtomicBool = AtomicBool::new(false);
+
+/// End a streamed line left open on standard error, so a message that
+/// follows starts on its own line.
+pub(crate) fn end_open_stderr_line() {
+    if STDERR_MID_LINE.swap(false, Ordering::Relaxed) {
+        eprintln!();
     }
 }
 
