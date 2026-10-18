@@ -22,6 +22,10 @@ not the design target.
 - Preserve benchmark contracts, validation authority, model controls, and stop
   rules when changing presentation. Compare exact provider requests when needed.
 - Keep user preferences, stdin intake, and TUI history out of benchmark mode.
+- Confine benchmark integration changes to adapters or `microgentic benchmark`.
+  Benchmark-specific operation must not change everyday `run`, the TUI, or
+  shared runtime defaults. Pass any benchmark customization explicitly through
+  the benchmark entry point.
 - Show evidence footers for project tools in the current exchange. Keep traces
   even when ordinary conversation does not display a footer.
 - Preserve unrelated user changes and Git stashes.
