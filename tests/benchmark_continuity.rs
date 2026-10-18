@@ -22,7 +22,6 @@ mod support;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 use support::*;
 
 const PROMPT: &str = "Inspect the project with list_tree, then finish. Unicode 世界.";
@@ -123,18 +122,15 @@ struct Capture {
 }
 
 /// Each odd request inspects the project with one tool call; each even one
-/// finishes. Sequential runs pace their first requests because historical
-/// trace file names have one-second precision.
-fn inspect_then_finish(wire: Wire, case: Case) -> MockProvider {
+/// finishes. Sequential attempts follow each other without a pause, so
+/// their traces start well within one second in the same directory.
+fn inspect_then_finish(wire: Wire) -> MockProvider {
     MockProvider::start(wire, move |request| {
         if request.number % 2 == 1 {
-            let mut steps = Vec::new();
-            if case == Case::Sequential {
-                steps.push(Step::Pause(Duration::from_millis(1050)));
-            }
-            steps.push(content("Inspecting."));
-            steps.push(tool_with_id("inspection", "list_tree", json!({})));
-            Reply::Stream(steps)
+            Reply::Stream(vec![
+                content("Inspecting."),
+                tool_with_id("inspection", "list_tree", json!({})),
+            ])
         } else {
             Reply::Stream(vec![content("DONE")])
         }
@@ -164,7 +160,7 @@ fn capture(
     side: &str,
     binary: &Path,
 ) -> Capture {
-    let provider = inspect_then_finish(wire, case);
+    let provider = inspect_then_finish(wire);
     let trace_dir = experiment
         .base
         .join(format!("{}-{}-{side}", case.name(), wire.name()));
@@ -280,6 +276,16 @@ fn capture(
     } else {
         vec![summary["trace_file"].as_str().expect("trace file").into()]
     };
+    // Unpaced attempts share one trace directory, each with its own file.
+    let directories: std::collections::BTreeSet<_> =
+        trace_files.iter().map(|file| file.parent()).collect();
+    let distinct: std::collections::BTreeSet<_> = trace_files.iter().collect();
+    assert_eq!(directories.len(), 1, "{label}: {trace_files:?}");
+    assert_eq!(
+        distinct.len(),
+        trace_files.len(),
+        "{label}: {trace_files:?}"
+    );
     let records: Vec<Value> = trace_files
         .iter()
         .flat_map(|file| trace_records(file))
