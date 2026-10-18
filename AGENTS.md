@@ -65,7 +65,11 @@ git worktree remove /tmp/mg-install
 
 Run every gate in `.hone-gates.json` on that revision immediately before you
 install it; a local install is a deployment. Install from a committed revision,
-not from a working tree that another agent may be editing. `~/.cargo/bin` comes before Homebrew on the
+not from a working tree that another agent may be editing. Do not reuse
+`target/install` for a `cargo test` in the main checkout afterwards: the test
+binaries bake in the worktree's `CARGO_MANIFEST_DIR`, Cargo does not rebuild
+them for the new path, and every fixture-reading and provenance test fails on
+a directory that no longer exists. `~/.cargo/bin` comes before Homebrew on the
 PATH here, so the Cargo build replaces the Homebrew one without an uninstall.
 
 Every push and tag starts GitHub Actions. Let those runs finish, including for
