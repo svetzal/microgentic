@@ -640,8 +640,12 @@ gateway still needs recovery, reasoning, telemetry, and tool-history conformance
   preserve binary and archive checksums, and check a copied executable while its
   source checkout is unavailable. Publish through `svetzal/tap`; see `RELEASING.md`.
 - [x] **Depend on a released Mojentic.** Microgentic depends on the published
-  Mojentic 3.0 crate; the benchmark continuity test showed provider requests
-  equal to 0.5.0 on both providers.
+  Mojentic 3.0.1 crate. Historical verification compares exact source revisions
+  `6198749` and `71f2b7c` across contract, goal, and sequential runs on oMLX and
+  Ollama. All six cases preserve complete request values, assembled packets,
+  context ledgers, and the suite's summary compatibility assertions. Binary
+  hashes, executable suite hashes, commands, and gate results are recorded in
+  [the adoption check](benchmarks/cli-migration/mojentic-adoption-check.json).
 - [ ] **Complete standalone packaging.** Expand packages to Windows and Linux
   ARM through native platform gates.
 - [ ] **Document the lifecycle.** Cover install, first task, provider switch,

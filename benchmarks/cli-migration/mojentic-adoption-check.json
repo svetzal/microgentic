@@ -1,0 +1,243 @@
+{
+  "baseline_sha256": "1dccef77cb837cf56b130c033a820e0053bf9da77b7807e88787ea0cdbeb15bb",
+  "current_sha256": "19ca193e84b6c348a63eda12b35f38fbcc54921f983e9e2cba11f68c3a777b60",
+  "results": [
+    {
+      "case": "contract",
+      "context_ledgers_equal": true,
+      "exact_snapshots_equal": true,
+      "provider": "omlx",
+      "provider_json_equal": true,
+      "requests_compared": 2,
+      "summary_schema_additive_keys": [],
+      "summary_schema_equal": true
+    },
+    {
+      "case": "contract",
+      "context_ledgers_equal": true,
+      "exact_snapshots_equal": true,
+      "provider": "ollama",
+      "provider_json_equal": true,
+      "requests_compared": 2,
+      "summary_schema_additive_keys": [],
+      "summary_schema_equal": true
+    },
+    {
+      "case": "goal",
+      "context_ledgers_equal": true,
+      "exact_snapshots_equal": true,
+      "provider": "omlx",
+      "provider_json_equal": true,
+      "requests_compared": 2,
+      "summary_schema_additive_keys": [],
+      "summary_schema_equal": true
+    },
+    {
+      "case": "goal",
+      "context_ledgers_equal": true,
+      "exact_snapshots_equal": true,
+      "provider": "ollama",
+      "provider_json_equal": true,
+      "requests_compared": 2,
+      "summary_schema_additive_keys": [],
+      "summary_schema_equal": true
+    },
+    {
+      "case": "sequential",
+      "context_ledgers_equal": true,
+      "exact_snapshots_equal": true,
+      "provider": "omlx",
+      "provider_json_equal": true,
+      "requests_compared": 4,
+      "summary_schema_additive_keys": [],
+      "summary_schema_equal": true
+    },
+    {
+      "case": "sequential",
+      "context_ledgers_equal": true,
+      "exact_snapshots_equal": true,
+      "provider": "ollama",
+      "provider_json_equal": true,
+      "requests_compared": 4,
+      "summary_schema_additive_keys": [],
+      "summary_schema_equal": true
+    }
+  ],
+  "schema_version": "microgentic_benchmark_mode_check.v1",
+  "source_revisions": {
+    "baseline": "6198749fca4e10111e989a430702523927ae7fd9",
+    "current": "71f2b7cb514eab6106e0c9878345d0a427cad232",
+    "verification_worktree_base": "21e4e7dc5f5d34a81f0e44124bf1965fc39f5ce9"
+  },
+  "artifact_build": {
+    "toolchain": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+    "cargo": "cargo 1.99.1 (5f94df478 2026-08-27)",
+    "command": "MICROGENTIC_RELEASE_REVISION=<full source revision> cargo build --locked --release --bins --manifest-path <archived source>/Cargo.toml",
+    "source_extraction": "git archive <full source revision> | tar -x -C <archived source>",
+    "exit_code": 0
+  },
+  "dependency": {
+    "name": "mojentic",
+    "version": "3.0.1",
+    "source": "registry+https://github.com/rust-lang/crates.io-index",
+    "checksum": "49c8b9b30a22a2b69b45ba08f8cb929b4b45c08ebed18ef86dfe8d9515fa7032"
+  },
+  "executable_contract": {
+    "schema": "microgentic_benchmark_mode_check.v1",
+    "sha256": {
+      "tests/benchmark_continuity.rs": "a78310a323d0752dbd5d4c069d9cedb72d47a22aa04f49ae28845dfa20de1a87",
+      "tests/support/provider.rs": "2dff186571dba6876e5764e8f409c85cf7470cf56e3e75e9c3ee10177cbe6cef",
+      "tests/support/fixtures.rs": "e3e1c131693891dcdc129241012bf61bde15c39db2eb5058f7f3438c09ac69d9",
+      "tests/support/mod.rs": "8ad925b43a49c46a1a38dda50e7b736ceaf497624db545f4d8d3dd5617c17b56",
+      "tests/support/terminal.rs": "b7c053c339026de0bcedd6fef0a7ecc1928394e03f86eadcdd6566473b19b754"
+    },
+    "command": "MICROGENTIC_CONTINUITY_BASELINE=<6198749 release binary> MICROGENTIC_CONTINUITY_CURRENT=<71f2b7c release binary> cargo test --locked --manifest-path <71f2b7c source>/Cargo.toml --test benchmark_continuity -- --ignored --nocapture",
+    "exit_code": 0,
+    "assertions": [
+      "Complete provider request JSON values are equal, not merely counts.",
+      "Exact assembled provider packet payloads are equal.",
+      "Complete context assembly ledger payloads are equal.",
+      "Historical summary keys remain; additions are limited to the suite allowlist (none observed).",
+      "Final summary values match; sequential attempt counts, final summaries, accepted_done, independent_exact, terminal_error, pre_artifact, post_artifact and artifact_unchanged match.",
+      "Sequential stop_reason is consecutive_unchanged_attempts, confirmed_exact_success is false, and request values show no context leakage between attempts.",
+      "Ambient config, stdin, project guidance, discovered context windows and session residency do not enter benchmark requests or ledgers."
+    ]
+  },
+  "scope": "Consumer adoption verification against the released registry artifact using the existing designated integration suite and scripted provider replies; no provider repository changes or fresh provider-release certification. The release-metadata-only worktree base has identical runtime sources, tests and gate definitions to the tested migration revision.",
+  "verification_environment": {
+    "os": "Linux x86_64",
+    "mdbook": "0.5.4",
+    "NO_COLOR": "unset for gates: inherited NO_COLOR=1 suppressed ANSI output in two existing colour-positive unit tests",
+    "cargo_cache": "Writable task-local copy of the existing Cargo cache; the shared cache is read-only.",
+    "target_directory": "Shared task-local build cache for archived migration and final worktree checks.",
+    "initial_test_attempt": {
+      "command": "cargo test --locked --all-targets --all-features",
+      "source_revision": "71f2b7cb514eab6106e0c9878345d0a427cad232",
+      "exit_code": 101,
+      "failures": [
+        "tui::canvas::tests::painting_skips_unwritten_edges_and_groups_runs",
+        "tui::launch::tests::without_colour_every_frame_uses_glyphs_and_attributes_only"
+      ],
+      "cause": "Inherited NO_COLOR=1; no source changes required.",
+      "focused_rerun": {
+        "command": "env -u NO_COLOR cargo test --locked --manifest-path <71f2b7c source>/Cargo.toml --lib tui::",
+        "exit_code": 0
+      }
+    },
+    "tool_resolution": "Use the existing Rust toolchain binaries and installed mdBook 0.5.4 directly on PATH, bypassing mise shims whose resolution depends on the source directory and Cargo home.",
+    "initial_docs_attempt": {
+      "command": "mdbook build book",
+      "source_revision": "71f2b7cb514eab6106e0c9878345d0a427cad232",
+      "exit_code": 1,
+      "cause": "The mise mdBook shim did not resolve in the archived source directory; the directly installed mdBook is version 0.5.4."
+    }
+  },
+  "required_gates": {
+    "migrated": {
+      "source_revision": "71f2b7cb514eab6106e0c9878345d0a427cad232",
+      "results": [
+        {
+          "name": "format",
+          "command": "cargo fmt --all -- --check",
+          "required": true,
+          "exit_code": 0
+        },
+        {
+          "name": "clippy",
+          "command": "cargo clippy --locked --all-targets --all-features -- -D warnings",
+          "required": true,
+          "exit_code": 0
+        },
+        {
+          "name": "test",
+          "command": "cargo test --locked --all-targets --all-features",
+          "required": true,
+          "exit_code": 0
+        },
+        {
+          "name": "release-build",
+          "command": "cargo build --locked --release --bins",
+          "required": true,
+          "exit_code": 0
+        },
+        {
+          "name": "collection-tests",
+          "command": "python3 -m unittest discover -s benchmarks -p 'test_collection_validation.py'",
+          "required": true,
+          "exit_code": 0
+        },
+        {
+          "name": "outcome-reader-tests",
+          "command": "python3 -m unittest discover -s benchmarks -p 'test_terminal_outcome.py'",
+          "required": true,
+          "exit_code": 0
+        },
+        {
+          "name": "docs",
+          "command": "mdbook build book",
+          "required": true,
+          "exit_code": 0
+        }
+      ],
+      "rust_test_totals": {
+        "passed": 667,
+        "failed": 0,
+        "ignored": 3
+      }
+    },
+    "worktree": {
+      "source_revision": "21e4e7dc5f5d34a81f0e44124bf1965fc39f5ce9",
+      "changes": "Only PUBLIC_READINESS.md and this verification record; runtime sources, dependency invariants and tests are unchanged.",
+      "results": [
+        {
+          "name": "format",
+          "command": "cargo fmt --all -- --check",
+          "required": true,
+          "exit_code": 0
+        },
+        {
+          "name": "clippy",
+          "command": "cargo clippy --locked --all-targets --all-features -- -D warnings",
+          "required": true,
+          "exit_code": 0
+        },
+        {
+          "name": "test",
+          "command": "cargo test --locked --all-targets --all-features",
+          "required": true,
+          "exit_code": 0
+        },
+        {
+          "name": "release-build",
+          "command": "cargo build --locked --release --bins",
+          "required": true,
+          "exit_code": 0
+        },
+        {
+          "name": "collection-tests",
+          "command": "python3 -m unittest discover -s benchmarks -p 'test_collection_validation.py'",
+          "required": true,
+          "exit_code": 0
+        },
+        {
+          "name": "outcome-reader-tests",
+          "command": "python3 -m unittest discover -s benchmarks -p 'test_terminal_outcome.py'",
+          "required": true,
+          "exit_code": 0
+        },
+        {
+          "name": "docs",
+          "command": "mdbook build book",
+          "required": true,
+          "exit_code": 0
+        }
+      ],
+      "rust_test_totals": {
+        "passed": 667,
+        "failed": 0,
+        "ignored": 3
+      },
+      "release_binary_sha256": "b5d3e695b38b661346ff2f9b56f931c60895c77b1ebb74872368dd08a97ac8c8"
+    }
+  }
+}
