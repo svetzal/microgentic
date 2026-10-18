@@ -9,7 +9,6 @@ mod context_snapshot;
 pub mod context_window;
 pub mod contract;
 mod conversation;
-pub mod first_token;
 pub mod guidance;
 pub mod initial_context;
 pub mod outcome;

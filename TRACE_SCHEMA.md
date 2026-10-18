@@ -108,15 +108,26 @@ The normal causal order is:
 8. deterministic tool, validation, and harness-policy events
 9. the next context ledger and provider-request snapshot
 
-`llm.context_assembly.response` times each provider request from the moment
-it is sent:
+`llm.context_assembly.response` carries the client timing Mojentic measures
+for each provider request, taken from the terminal `StreamMetrics` of the
+completion (Mojentic 3.0 or later):
 
-- `time_to_first_token_ms`: milliseconds to the first streamed token of any
-  kind, or `null` when the stream produced none. A provider progress frame
-  that reports content, thinking, or a tool call counts as that token.
+- `time_to_first_token_ms`: milliseconds from dispatch to the first semantic
+  token of any kind, or `null` when the stream produced none. A provider frame
+  that carries thinking, content, or a tool-call fragment counts as that token;
+  keepalive frames do not.
 - `first_token_kind`: `content`, `thinking`, or `tool_call`, or `null`.
-- `request_duration_ms`: milliseconds from sending the request to the end of
-  its stream.
+- `request_duration_ms`: milliseconds from dispatch to the completion's
+  terminal success or failure.
+
+The clock starts when the request is dispatched and spans recovery retries of
+the same completion, including admission and backoff. Each provider call
+Microgentic makes is one completion, so a tool result sent back to the model
+starts a new clock, as it did before. All three fields are `null` when the
+stream ended before its terminal metrics arrived, for example when Microgentic
+interrupted a stalled or thinking-only stream. Before Mojentic 3.0.1 the
+harness measured this itself, from just before dispatch to the end of the
+stream, and `request_duration_ms` was never `null`.
 
 Its older `duration_ms` starts slightly earlier, before the progress status
 and request snapshot are written.

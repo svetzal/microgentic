@@ -2789,7 +2789,9 @@ async fn stream_response<G: LlmGateway + ?Sized>(
             validation_repair_active,
         })?;
         trace.reply_started();
-        let mut first_token = crate::first_token::FirstTokenClock::start();
+        // Mojentic stamps its client timing (first token, request duration)
+        // on the completion's terminal metrics chunk.
+        let mut terminal_metrics: Option<StreamMetrics> = None;
         let mut stream = gateway.complete_stream(
             model,
             &current_messages,
@@ -2872,9 +2874,6 @@ async fn stream_response<G: LlmGateway + ?Sized>(
             };
             match chunk_result {
                 Ok(StreamChunk::Content(chunk)) => {
-                    if !chunk.is_empty() {
-                        first_token.observe(crate::first_token::TokenKind::Content);
-                    }
                     last_observable_progress = Instant::now();
                     stalled_candidate_checks = 0;
                     latest_progress_state = ModelProgressState::Generating;
@@ -2901,7 +2900,6 @@ async fn stream_response<G: LlmGateway + ?Sized>(
                     trace.stream_content(&chunk);
                 }
                 Ok(StreamChunk::ToolCalls(tool_calls)) => {
-                    first_token.observe(crate::first_token::TokenKind::ToolCall);
                     last_observable_progress = Instant::now();
                     stalled_candidate_checks = 0;
                     latest_progress_state = ModelProgressState::GeneratingToolCall;
@@ -2919,7 +2917,6 @@ async fn stream_response<G: LlmGateway + ?Sized>(
                     accumulated_tool_calls = tool_calls;
                 }
                 Ok(StreamChunk::Thinking(thinking)) => {
-                    first_token.observe(crate::first_token::TokenKind::Thinking);
                     if completion_config.preserve_reasoning {
                         call_reasoning.push_str(&thinking);
                     }
@@ -3052,15 +3049,6 @@ async fn stream_response<G: LlmGateway + ?Sized>(
                         progress.tool_call_count > 0 || progress.accumulated_tool_call_count > 0;
                     let progress_has_content = progress.content_chars > 0;
                     let progress_has_thinking = progress.thinking_chars > 0;
-                    // A progress frame can report the first token before the
-                    // chunk that carries it.
-                    if progress_has_tool_call {
-                        first_token.observe(crate::first_token::TokenKind::ToolCall);
-                    } else if progress_has_content {
-                        first_token.observe(crate::first_token::TokenKind::Content);
-                    } else if progress_has_thinking {
-                        first_token.observe(crate::first_token::TokenKind::Thinking);
-                    }
                     if progress.tool_call_count > 0 || progress.accumulated_tool_call_count > 0 {
                         tool_call_progress_frame_count += 1;
                         call_tool_call_progress_frame_count += 1;
@@ -3121,6 +3109,7 @@ async fn stream_response<G: LlmGateway + ?Sized>(
                     }
                 }
                 Ok(StreamChunk::Metrics(metrics)) => {
+                    terminal_metrics = Some(metrics.clone());
                     last_observable_progress = Instant::now();
                     stalled_candidate_checks = 0;
                     if call_content.is_empty()
@@ -3209,7 +3198,7 @@ async fn stream_response<G: LlmGateway + ?Sized>(
             }
         }
         drop(stream);
-        let timing = first_token.finish();
+        let timing = terminal_metrics.as_ref();
         if let Some(residency) = trace.residency() {
             residency.reference_text(trace, &call_content, turn)?;
         }
@@ -3220,9 +3209,9 @@ async fn stream_response<G: LlmGateway + ?Sized>(
                 "turn": turn,
                 "llm_call_depth": depth,
                 "duration_ms": started.elapsed().as_millis(),
-                "time_to_first_token_ms": timing.time_to_first_token_ms,
-                "first_token_kind": timing.first_token_kind,
-                "request_duration_ms": timing.request_duration_ms,
+                "time_to_first_token_ms": timing.and_then(|metrics| metrics.time_to_first_token_ms),
+                "first_token_kind": timing.and_then(|metrics| metrics.first_token_kind.as_deref()),
+                "request_duration_ms": timing.and_then(|metrics| metrics.request_duration_ms),
                 "content_chars": call_content.len(),
                 "content_estimated_tokens": estimate_tokens(call_content.len()),
                 "thinking_chars": call_thinking_chars,
@@ -9702,7 +9691,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn each_response_records_its_first_token_kind_and_time() {
+    async fn each_response_records_the_timing_mojentic_measured() {
         for (first, kind) in [
             (StreamChunk::Content("DONE".to_string()), "content"),
             (StreamChunk::Thinking("Planning.".to_string()), "thinking"),
@@ -9712,15 +9701,36 @@ mod tests {
             ),
         ] {
             let fixture = AgentFixture::new("Finish.");
-            let gateway =
-                ScriptedGateway::new(vec![vec![first, StreamChunk::Content("DONE".to_string())]]);
+            let timed = StreamMetrics {
+                time_to_first_token_ms: Some(120),
+                first_token_kind: Some(kind.to_string()),
+                request_duration_ms: Some(900),
+                ..stream_metrics(3)
+            };
+            let gateway = ScriptedGateway::new(vec![vec![
+                first,
+                StreamChunk::Content("DONE".to_string()),
+                StreamChunk::Metrics(timed),
+            ]]);
             let summary = fixture.run(&gateway, 1).await;
             let trace = std::fs::read_to_string(summary.trace_file).unwrap();
             let response = trace_payloads(&trace, "llm.context_assembly.response").remove(0);
             assert_eq!(response["first_token_kind"], kind);
-            let first_ms = response["time_to_first_token_ms"].as_u64().unwrap();
-            assert!(first_ms <= response["request_duration_ms"].as_u64().unwrap());
+            assert_eq!(response["time_to_first_token_ms"], 120);
+            assert_eq!(response["request_duration_ms"], 900);
         }
+    }
+
+    #[tokio::test]
+    async fn a_stream_without_terminal_metrics_has_no_timing() {
+        let fixture = AgentFixture::new("Finish.");
+        let gateway = ScriptedGateway::new(vec![vec![StreamChunk::Content("DONE".to_string())]]);
+        let summary = fixture.run(&gateway, 1).await;
+        let trace = std::fs::read_to_string(summary.trace_file).unwrap();
+        let response = trace_payloads(&trace, "llm.context_assembly.response").remove(0);
+        assert!(response["first_token_kind"].is_null(), "{response}");
+        assert!(response["time_to_first_token_ms"].is_null(), "{response}");
+        assert!(response["request_duration_ms"].is_null(), "{response}");
     }
 
     #[tokio::test]
