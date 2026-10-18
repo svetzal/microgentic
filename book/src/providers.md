@@ -78,3 +78,30 @@ and the file overrides the default.
 Each value must be above 0 and at most 1. Traces record the effective values
 beside each context ledger. Benchmark mode ignores the file and records a flag
 only when you give it.
+
+## Native reasoning
+
+The Mojentic gateways represent native assistant reasoning separately from
+content, keep named Ollama effort values distinct, and support xhigh. Coding
+requests use temperature `1.0`.
+
+Use `--reasoning-profile qwen3.8 --reasoning-effort medium` to validate the model's
+supported controls before HTTP. The profile accepts disabled, low, medium and
+xhigh; high is rejected rather than silently translated. Omitted effort still
+means an unknown provider default. An omitted profile delegates capability
+validation to the server; unknown model names are never matched heuristically.
+
+`--preserve-reasoning` opts into native completed-response history. It is off by
+default so retention can be varied independently from effort. The worker keeps
+reasoning with its assistant tool request or final response, includes its size
+in context accounting, and exposes it in exact snapshots and native transcripts.
+File-read consolidation retains reasoning in its original assistant turn while
+projecting the tool evidence separately; it does not attach reasoning to an
+invented tool request. Existing context rewriting policies still apply.
+
+Cancelled/capped partial chains remain separate from completed native history;
+`--reasoning-checkpoint-tokens` retains its independent experimental meaning.
+The oMLX gateway requests chat_template_kwargs.preserve_thinking=true when native
+retention is enabled. Forced server settings can override that request, so
+benchmark registration must record server settings too. Sampling, stop budgets,
+and advisory defaults are unchanged by these flags.
