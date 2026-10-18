@@ -136,10 +136,9 @@ impl Probe<'_> {
         let depth = self.index;
         self.index += 1;
         let config = CompletionConfig {
-            temperature: self.cfg.temperature,
-            num_ctx: 262144,
-            max_tokens: self.cfg.max_tokens,
-            num_predict: Some(self.cfg.max_tokens as i32),
+            temperature: Some(self.cfg.temperature),
+            num_ctx: Some(262144),
+            max_tokens: Some(self.cfg.max_tokens),
             reasoning_effort: self.cfg.reasoning_effort,
             reasoning_profile: self.cfg.reasoning_profile.clone(),
             preserve_reasoning: self.cfg.preserve_reasoning,
@@ -154,7 +153,7 @@ impl Probe<'_> {
         self.trace.event("llm.provider_request.assembled",json!({"turn":1,"llm_call_depth":depth,
             "provider":self.cfg.provider,"model":self.cfg.model,"messages":messages,
             "tools":tools.iter().map(|t| t.descriptor()).collect::<Vec<_>>(),
-            "completion":{"num_ctx":262144,"max_tokens":config.max_tokens,"num_predict":config.num_predict,"temperature":config.temperature,"reasoning_effort":config.reasoning_effort,"reasoning_profile":config.reasoning_profile,"preserve_reasoning":config.preserve_reasoning}}))?;
+            "completion":{"num_ctx":262144,"max_tokens":config.max_tokens,"num_predict":config.max_tokens,"temperature":config.temperature,"reasoning_effort":config.reasoning_effort,"reasoning_profile":config.reasoning_profile,"preserve_reasoning":config.preserve_reasoning}}))?;
         self.previous = serialized;
         let start = Instant::now();
         let mut first = None;
