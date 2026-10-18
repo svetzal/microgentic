@@ -1,23 +1,133 @@
-//! How `microgentic run` reports the way a run ended: the typed `outcome` in
-//! the JSON summary, one diagnostic line on standard error, and the exit
-//! status. The benchmark surface and the compatibility executable keep
-//! exit 0 and gain only the `outcome` field. Mock providers, no model.
-mod support;
-
+//! CLI outcome coverage migrated from tests/run_outcomes.rs. All requests terminate
+//! at a task-scoped LlmGateway double; no sockets, servers, or Python harnesses.
+use super::*;
+use crate::outcome_test_io::{ACTIVE, OutcomeIo};
+use mojentic::llm::{gateway::StreamChunk, models::LlmToolCall};
 use serde_json::{Value, json};
-use std::process::Output;
-use support::*;
-
-fn env(provider: &MockProvider, workspace: &Workspace) -> Vec<(&'static str, String)> {
-    let mut env = provider.env();
-    env.push(("XDG_STATE_HOME", workspace.state.display().to_string()));
-    env.push((
-        "XDG_CONFIG_HOME",
-        workspace.base.join("config").display().to_string(),
-    ));
-    env
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicUsize, Ordering},
+};
+#[path = "../../tests/support/fixtures.rs"]
+#[allow(dead_code)]
+mod fixtures;
+use fixtures::*;
+#[derive(Clone, Copy)]
+enum Wire {
+    Omlx,
+    Ollama,
 }
-
+impl Wire {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Omlx => "omlx",
+            Self::Ollama => "ollama",
+        }
+    }
+}
+struct ScriptedGateway {
+    wire: Wire,
+    turns: Vec<Vec<StreamChunk>>,
+    calls: AtomicUsize,
+}
+impl ScriptedGateway {
+    fn turns(wire: Wire, turns: Vec<Vec<StreamChunk>>) -> Self {
+        Self {
+            wire,
+            turns,
+            calls: AtomicUsize::new(0),
+        }
+    }
+    fn replying(wire: Wire, steps: Vec<StreamChunk>) -> Self {
+        Self::turns(wire, vec![steps])
+    }
+    fn request_count(&self) -> usize {
+        self.calls.load(Ordering::SeqCst)
+    }
+    fn wire(&self) -> Wire {
+        self.wire
+    }
+}
+fn content(text: &str) -> StreamChunk {
+    StreamChunk::Content(text.into())
+}
+fn tool(name: &str, arguments: Value) -> StreamChunk {
+    StreamChunk::ToolCalls(vec![LlmToolCall {
+        id: Some(format!("call-{name}")),
+        name: name.into(),
+        arguments: serde_json::from_value(arguments).unwrap(),
+    }])
+}
+fn microgentic() -> &'static str {
+    "microgentic"
+}
+fn legacy_binary() -> &'static str {
+    "adaptive-agent-harness"
+}
+struct Output {
+    status: Status,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+}
+struct Status(ExitCode);
+impl Status {
+    fn code(&self) -> Option<i32> {
+        (0..=255u8)
+            .find(|n| self.0 == ExitCode::from(*n))
+            .map(i32::from)
+    }
+}
+fn execute(
+    binary: &str,
+    args: &[&str],
+    provider: &ScriptedGateway,
+    workspace: &Workspace,
+) -> Output {
+    let mut argv = vec![binary, "--config", workspace.config.to_str().unwrap()];
+    argv.extend_from_slice(args);
+    argv.extend(["--dir", workspace.project.to_str().unwrap()]);
+    let cli =
+        Cli::from_arg_matches(&command_definition().try_get_matches_from(argv).unwrap()).unwrap();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    // State is scoped to this call, just like its gateway and stdin.
+    let io = Arc::new(OutcomeIo {
+        state: workspace.state.clone(),
+        tool_root: workspace.project.clone(),
+        streams: Mutex::new(provider.turns.clone().into()),
+        calls: AtomicUsize::new(0),
+        discoveries: AtomicUsize::new(0),
+    });
+    let everyday = matches!(&cli.command, Some(Command::Run(run)) if run.experiment.is_none() && run.contract.is_none());
+    let code = runtime
+        .block_on(ACTIVE.scope(
+            io.clone(),
+            dispatch_cli(cli, binary == legacy_binary(), &mut stdout, &mut stderr),
+        ))
+        .unwrap();
+    if everyday {
+        assert_eq!(
+            io.discoveries.load(Ordering::SeqCst),
+            1,
+            "everyday metadata lookup uses the in-process gateway"
+        );
+    }
+    provider
+        .calls
+        .fetch_add(io.calls.load(Ordering::SeqCst), Ordering::SeqCst);
+    if let Ok(summary) = serde_json::from_slice::<Value>(&stdout) {
+        assert_eq!(summary["provider"], provider.wire.name());
+    }
+    Output {
+        status: Status(code),
+        stdout,
+        stderr,
+    }
+}
 fn stdout(output: &Output) -> String {
     String::from_utf8(output.stdout.clone()).expect("stdout is UTF-8")
 }
@@ -36,24 +146,29 @@ fn summary(output: &Output) -> Value {
     })
 }
 
+fn contract_case(name: &str) -> Value {
+    let contract: Value = serde_json::from_str(include_str!(
+        "../../benchmarks/fixtures/terminal_outcome_contract.json"
+    ))
+    .expect("terminal outcome contract JSON");
+    assert_eq!(
+        contract["schema_version"],
+        "microgentic_terminal_outcome_contract.v1"
+    );
+    contract["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|case| case["name"] == name)
+        .unwrap_or_else(|| panic!("no contract case {name}"))
+        .clone()
+}
+
 /// The run's terminal trace event carries the same outcome as the summary,
 /// and its identifying fields match the named case of the contract that the
 /// benchmark classifier reads (benchmarks/fixtures/terminal_outcome_contract.json).
 fn assert_terminal_contract(case: &str, summary: &Value) {
-    let contract: Value = serde_json::from_str(
-        &std::fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("benchmarks/fixtures/terminal_outcome_contract.json"),
-        )
-        .expect("the outcome contract"),
-    )
-    .expect("the outcome contract is JSON");
-    let expected = contract["cases"]
-        .as_array()
-        .expect("contract cases")
-        .iter()
-        .find(|entry| entry["name"] == case)
-        .unwrap_or_else(|| panic!("no contract case {case}"));
+    let expected = contract_case(case);
     let trace = std::path::PathBuf::from(summary["trace_file"].as_str().expect("trace path"));
     let terminal = trace_records(&trace)
         .into_iter()
@@ -81,7 +196,7 @@ fn diagnostic(output: &Output) -> Option<String> {
 
 /// An everyday `microgentic run --prompt`.
 fn everyday(
-    provider: &MockProvider,
+    provider: &ScriptedGateway,
     workspace: &Workspace,
     prompt: &str,
     extra: &[&str],
@@ -96,13 +211,7 @@ fn everyday(
         prompt,
     ];
     args.extend_from_slice(extra);
-    run_binary(
-        microgentic(),
-        &args,
-        &workspace.project,
-        &env(provider, workspace),
-        b"",
-    )
+    execute(microgentic(), &args, provider, workspace)
 }
 
 /// A task run through `binary`: `verb` is `run` or `benchmark run`, the
@@ -111,7 +220,7 @@ fn everyday(
 fn task(
     binary: &str,
     verb: &[&str],
-    provider: &MockProvider,
+    provider: &ScriptedGateway,
     workspace: &Workspace,
     extra: &[&str],
 ) -> Output {
@@ -130,27 +239,28 @@ fn task(
         "test-model",
     ]);
     args.extend_from_slice(extra);
-    run_binary(
-        binary,
-        &args,
-        &workspace.project,
-        &env(provider, workspace),
-        b"",
-    )
+    execute(binary, &args, provider, workspace)
 }
 
 fn write_task(workspace: &Workspace, text: &str) {
     std::fs::write(workspace.base.join("task.md"), text).expect("writing task.md");
 }
 
-// ---------------------------------------------------------------- replied
-
 fn replied(wire: Wire) {
     let workspace = Workspace::new();
-    let provider = MockProvider::replying(wire, vec![content("Hello there.")]);
+    let provider = ScriptedGateway::replying(wire, vec![content("Hello there.")]);
     let output = everyday(&provider, &workspace, "Hello!", &["--json"]);
     assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
-    assert_eq!(summary(&output)["outcome"], json!({"kind": "replied"}));
+    let summary = summary(&output);
+    assert_eq!(summary["outcome"], json!({"kind": "replied"}));
+    let trace = trace_records(std::path::Path::new(
+        summary["trace_file"].as_str().unwrap(),
+    ));
+    let terminal = trace
+        .iter()
+        .rfind(|event| event["kind"] == "run.finished")
+        .unwrap();
+    assert_eq!(terminal["payload"]["outcome"], summary["outcome"]);
     assert_eq!(diagnostic(&output), None, "{}", stderr(&output));
 
     let output = everyday(&provider, &workspace, "Hello!", &[]);
@@ -174,16 +284,22 @@ fn a_completed_reply_exits_zero_with_a_replied_outcome_ollama() {
 fn done(wire: Wire) {
     let workspace = Workspace::new();
     write_task(&workspace, "Finish with DONE.\n");
-    let provider = MockProvider::replying(wire, vec![content("DONE")]);
+    let provider = ScriptedGateway::replying(wire, vec![content("DONE")]);
     let output = task(microgentic(), &["run"], &provider, &workspace, &["--json"]);
     assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
-    assert_eq!(summary(&output)["outcome"], json!({"kind": "done"}));
+    assert_eq!(
+        summary(&output)["outcome"],
+        contract_case("done")["outcome"]
+    );
     assert_terminal_contract("done", &summary(&output));
     assert_eq!(diagnostic(&output), None, "{}", stderr(&output));
 
     let output = task(legacy_binary(), &["run"], &provider, &workspace, &[]);
     assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
-    assert_eq!(summary(&output)["outcome"], json!({"kind": "done"}));
+    assert_eq!(
+        summary(&output)["outcome"],
+        contract_case("done")["outcome"]
+    );
 }
 
 #[test]
@@ -203,7 +319,7 @@ const FAIL_TEXT: &str = "FAIL the fixture file is missing";
 fn failed(wire: Wire) {
     let workspace = Workspace::new();
     write_task(&workspace, "Read the fixture and finish.\n");
-    let provider = MockProvider::replying(wire, vec![content(FAIL_TEXT)]);
+    let provider = ScriptedGateway::replying(wire, vec![content(FAIL_TEXT)]);
 
     // Plain output: stdout carries the FAIL text, stderr says how it ended.
     let output = task(microgentic(), &["run"], &provider, &workspace, &[]);
@@ -224,10 +340,11 @@ fn failed(wire: Wire) {
     let output = task(microgentic(), &["run"], &provider, &workspace, &["--json"]);
     assert_eq!(output.status.code(), Some(3), "{}", stderr(&output));
     let json = summary(&output);
-    assert_eq!(
-        json["outcome"],
-        json!({"kind": "failed", "reason": FAIL_TEXT})
-    );
+    assert_eq!(json["outcome"], {
+        let mut outcome = contract_case("failed")["outcome"].clone();
+        outcome["reason"] = json!(FAIL_TEXT);
+        outcome
+    });
     assert_terminal_contract("failed", &json);
     assert_eq!(
         diagnostic(&output).as_deref(),
@@ -246,23 +363,25 @@ fn failed(wire: Wire) {
         &["benchmark", "run"],
         &provider,
         &workspace,
-        &["--dir", &workspace.project.display().to_string()],
+        &[],
     );
     assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
-    assert_eq!(
-        summary(&output)["outcome"],
-        json!({"kind": "failed", "reason": FAIL_TEXT})
-    );
+    assert_eq!(summary(&output)["outcome"], {
+        let mut outcome = contract_case("failed")["outcome"].clone();
+        outcome["reason"] = json!(FAIL_TEXT);
+        outcome
+    });
     // Benchmark adapters read the same contract from the benchmark trace.
     assert_terminal_contract("failed", &summary(&output));
     assert_eq!(diagnostic(&output), None, "{}", stderr(&output));
 
     let output = task(legacy_binary(), &["run"], &provider, &workspace, &[]);
     assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
-    assert_eq!(
-        summary(&output)["outcome"],
-        json!({"kind": "failed", "reason": FAIL_TEXT})
-    );
+    assert_eq!(summary(&output)["outcome"], {
+        let mut outcome = contract_case("failed")["outcome"].clone();
+        outcome["reason"] = json!(FAIL_TEXT);
+        outcome
+    });
     assert_eq!(diagnostic(&output), None, "{}", stderr(&output));
 }
 
@@ -288,7 +407,7 @@ fn withheld_by_validation(wire: Wire) {
         &workspace,
         "Change the greeting in greeting.py to Hello there, then validate:\n\n```sh\npytest\n```\n",
     );
-    let provider = MockProvider::turns(
+    let provider = ScriptedGateway::turns(
         wire,
         vec![
             vec![tool(
@@ -307,9 +426,8 @@ fn withheld_by_validation(wire: Wire) {
     );
     assert_eq!(output.status.code(), Some(4), "{}", stderr(&output));
     let outcome = &summary(&output)["outcome"];
-    assert_eq!(outcome["kind"], "withheld");
-    assert_eq!(outcome["gate"], "validation");
     assert_terminal_contract("withheld_validation", &summary(&output));
+    assert_eq!(workspace.read("greeting.py"), "print('Hello there')\n");
     assert_eq!(
         outcome["detail"],
         "edits were not validated before the reply"
@@ -341,7 +459,7 @@ fn a_new_stash_before_done_exits_four_as_withheld_by_the_stash_gate() {
     workspace.git_init();
     workspace.write("tracked.txt", "changed\n");
     write_task(&workspace, "Tidy the working tree and finish.\n");
-    let provider = MockProvider::turns(
+    let provider = ScriptedGateway::turns(
         Wire::Omlx,
         vec![
             vec![tool(
@@ -360,9 +478,16 @@ fn a_new_stash_before_done_exits_four_as_withheld_by_the_stash_gate() {
     );
     assert_eq!(output.status.code(), Some(4), "{}", stderr(&output));
     let outcome = &summary(&output)["outcome"];
-    assert_eq!(outcome["kind"], "withheld");
-    assert_eq!(outcome["gate"], "stash");
     assert_terminal_contract("withheld_stash", &summary(&output));
+    let json = summary(&output);
+    assert_eq!(
+        diagnostic(&output),
+        Some(format!(
+            "microgentic: completion withheld by the Git stash gate: {}; evidence: {}",
+            json["outcome"]["detail"].as_str().unwrap(),
+            json["trace_file"].as_str().unwrap(),
+        ))
+    );
     let detail = outcome["detail"].as_str().expect("detail");
     assert!(
         detail.starts_with("new stash object IDs: [\"")
@@ -400,7 +525,7 @@ fn an_unrun_probe_before_done_exits_four_as_withheld_by_the_probe_gate() {
         .to_string(),
     )
     .expect("writing the contract");
-    let provider = MockProvider::replying(Wire::Omlx, vec![content("DONE")]);
+    let provider = ScriptedGateway::replying(Wire::Omlx, vec![content("DONE")]);
     let output = task(
         microgentic(),
         &["run"],
@@ -416,9 +541,16 @@ fn an_unrun_probe_before_done_exits_four_as_withheld_by_the_probe_gate() {
     );
     assert_eq!(output.status.code(), Some(4), "{}", stderr(&output));
     let outcome = &summary(&output)["outcome"];
-    assert_eq!(outcome["kind"], "withheld");
-    assert_eq!(outcome["gate"], "probes");
     assert_terminal_contract("withheld_probes", &summary(&output));
+    let json = summary(&output);
+    assert_eq!(
+        diagnostic(&output),
+        Some(format!(
+            "microgentic: completion withheld by the probe gate: {}; evidence: {}",
+            json["outcome"]["detail"].as_str().unwrap(),
+            json["trace_file"].as_str().unwrap(),
+        ))
+    );
     assert_eq!(outcome["detail"], "probe `check` missing");
 }
 
@@ -430,7 +562,7 @@ fn iteration_budget(wire: Wire) {
     let workspace = Workspace::new();
     workspace.write("notes.txt", "one\ntwo\n");
     write_task(&workspace, "Look around, then finish.\n");
-    let provider = MockProvider::turns(
+    let provider = ScriptedGateway::turns(
         wire,
         vec![
             vec![tool("list_tree", json!({"path": ".", "max_depth": 1}))],
@@ -451,8 +583,6 @@ fn iteration_budget(wire: Wire) {
     );
     assert_eq!(output.status.code(), Some(5), "{}", stderr(&output));
     let outcome = &summary(&output)["outcome"];
-    assert_eq!(outcome["kind"], "hard_stop");
-    assert_eq!(outcome["cause"], "iteration_budget");
     assert_terminal_contract("iteration_budget", &summary(&output));
     assert_eq!(outcome["detail"], "2 turns used; last: Still looking.");
     assert_eq!(
@@ -484,13 +614,20 @@ fn an_exhausted_iteration_budget_exits_five_ollama() {
 fn repeated_empty_responses_exit_five_as_an_empty_response_hard_stop() {
     let workspace = Workspace::new();
     write_task(&workspace, "Say anything, then finish.\n");
-    let provider = MockProvider::replying(Wire::Omlx, vec![]);
+    let provider = ScriptedGateway::replying(Wire::Omlx, vec![]);
     let output = task(microgentic(), &["run"], &provider, &workspace, &["--json"]);
     assert_eq!(output.status.code(), Some(5), "{}", stderr(&output));
     let outcome = &summary(&output)["outcome"];
-    assert_eq!(outcome["kind"], "hard_stop");
-    assert_eq!(outcome["cause"], "empty_response");
     assert_terminal_contract("empty_response", &summary(&output));
+    let json = summary(&output);
+    assert_eq!(
+        diagnostic(&output),
+        Some(format!(
+            "microgentic: stopped by the runtime (empty response): {}; evidence: {}",
+            json["outcome"]["detail"].as_str().unwrap(),
+            json["trace_file"].as_str().unwrap(),
+        ))
+    );
     assert_eq!(
         outcome["detail"],
         "turn 3 produced 3 consecutive empty responses with no tool calls or final text"

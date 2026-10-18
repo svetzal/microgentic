@@ -1,6 +1,6 @@
 {
   "schema_version": "microgentic_terminal_outcome_contract.v1",
-  "description": "Typed outcomes that Microgentic writes in its terminal trace event, and the label benchmarks/terminal_outcome.py gives each. tests/run_outcomes.rs checks that the binary writes these outcomes; benchmarks/test_terminal_outcome.py checks the labels. Only the identifying fields are listed; detail and reason text varies by run.",
+  "description": "Typed outcomes that Microgentic writes in its terminal trace event, and the label benchmarks/terminal_outcome.py gives each. src/cli/run_outcomes.rs checks that the CLI writes these outcomes; benchmarks/test_terminal_outcome.py checks the labels. Only the identifying fields are listed; detail and reason text varies by run.",
   "cases": [
     {"name": "done", "terminal_kind": "run.finished", "outcome": {"kind": "done"}, "label": "done"},
     {"name": "failed", "terminal_kind": "run.finished", "outcome": {"kind": "failed"}, "label": "fail"},

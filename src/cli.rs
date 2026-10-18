@@ -935,6 +935,15 @@ pub async fn run() -> Result<ExitCode> {
 
 async fn dispatch(legacy: bool) -> Result<ExitCode> {
     let cli = Cli::from_arg_matches(&command_definition().get_matches())?;
+    dispatch_cli(cli, legacy, &mut std::io::stdout(), &mut std::io::stderr()).await
+}
+
+async fn dispatch_cli(
+    cli: Cli,
+    legacy: bool,
+    stdout: &mut (dyn Write + Send),
+    stderr: &mut (dyn Write + Send),
+) -> Result<ExitCode> {
     let Some(command) = cli.command else {
         if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
             bail!("interactive mode needs a terminal; try: echo 'Hello!' | microgentic run");
@@ -958,14 +967,13 @@ async fn dispatch(legacy: bool) -> Result<ExitCode> {
                 // tool calls; stdout carries the reply itself.
                 plain_reply(&summary.final_summary).to_owned()
             };
-            writeln!(std::io::stdout().lock(), "{output}")?;
+            writeln!(stdout, "{output}")?;
             // Plain output says on standard error what the run changed and
             // checked; JSON carries the same report in the summary.
             if !json {
                 let lines = crate::run_report::report_lines(&summary.changes, &summary.checks);
                 if !lines.is_empty() {
                     crate::trace::end_open_stderr_line();
-                    let mut stderr = std::io::stderr().lock();
                     for line in lines {
                         writeln!(stderr, "microgentic: {line}")?;
                     }
@@ -977,7 +985,7 @@ async fn dispatch(legacy: bool) -> Result<ExitCode> {
             if !legacy && !summary.outcome.is_success() {
                 crate::trace::end_open_stderr_line();
                 writeln!(
-                    std::io::stderr().lock(),
+                    stderr,
                     "microgentic: {}; evidence: {}",
                     summary.outcome,
                     summary.trace_file.display()
@@ -1001,7 +1009,7 @@ async fn dispatch(legacy: bool) -> Result<ExitCode> {
         Command::Benchmark { command } => match command {
             BenchmarkCommand::Run(run) => {
                 let summary = run_agent(prepare_benchmark_run(run)?).await?;
-                println!("{}", serde_json::to_string_pretty(&summary)?);
+                writeln!(stdout, "{}", serde_json::to_string_pretty(&summary)?)?;
             }
             BenchmarkCommand::RunSequential(args) => {
                 let agent = prepare_benchmark_run(args.run)?;
@@ -1174,6 +1182,10 @@ fn plain_reply(reply: &str) -> &str {
 const MAX_STDIN_BYTES: u64 = 1024 * 1024;
 
 fn read_stdin() -> Result<Option<String>> {
+    #[cfg(test)]
+    if crate::outcome_test_io::ACTIVE.try_with(|_| ()).is_ok() {
+        return Ok(None);
+    }
     if std::io::stdin().is_terminal() {
         return Ok(None);
     }
@@ -1253,6 +1265,18 @@ fn absolute(path: &Path) -> Result<PathBuf> {
     })
 }
 
+// The process owns its working directory in production. In-process outcome
+// tests supply that filesystem boundary through the task-scoped I/O double.
+fn enter_tool_root(root: &Path) -> Result<()> {
+    #[cfg(test)]
+    if let Ok(tool_root) = crate::outcome_test_io::ACTIVE.try_with(|io| io.tool_root.clone()) {
+        assert_eq!(root, tool_root);
+        return Ok(());
+    }
+    std::env::set_current_dir(root)?;
+    Ok(())
+}
+
 fn prepare_benchmark_run(mut run: RunArgs) -> Result<AgentRunConfig> {
     if run.no_project_guidance {
         bail!("benchmark mode never reads project guidance; remove --no-project-guidance");
@@ -1277,7 +1301,7 @@ fn prepare_benchmark_run(mut run: RunArgs) -> Result<AgentRunConfig> {
         bail!("--dir must name a project directory");
     }
     // No personal defaults, stdin intake, prompt files, or conversation state.
-    std::env::set_current_dir(root)?;
+    enter_tool_root(&root)?;
     run.into_config()
 }
 
@@ -1398,7 +1422,7 @@ fn prepare_run_with_mode(
     if let Some(trace) = &mut run.trace_dir {
         *trace = absolute(trace)?;
     }
-    std::env::set_current_dir(root)?;
+    enter_tool_root(&root)?;
     let no_project_guidance = run.no_project_guidance;
     let explicit_window = run.context_window_tokens;
     let mut config = run.into_config()?;
@@ -1562,3 +1586,7 @@ fn contract_source(goal: Option<PathBuf>, contract: Option<PathBuf>) -> Result<C
         }
     }
 }
+
+#[cfg(test)]
+#[path = "cli/run_outcomes.rs"]
+mod run_outcomes;
