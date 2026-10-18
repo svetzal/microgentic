@@ -115,9 +115,10 @@ Rapid attempts sharing a trace directory can therefore fail before work starts.
 - [x] Map public `run` outcomes to documented exit codes. Exercise returned `FAIL`,
   provider failure, exhausted budgets, unchecked completion, and cancellation
   through the installed binary. Check redirected stdout and stderr separately.
-  Note: the table is in the book's Commands page. Scripted-gateway tests cover
-  each code through the built binary with stdout and stderr captured
-  separately; the installed-binary smoke test still checks only `DONE`.
+  Note: the table is in the book's Commands page. Outcome tests in `src/cli/run_outcomes.rs` drive the CLI dispatcher and
+  public agent API with a task-scoped gateway, capturing stdout, stderr,
+  terminal traces and exit codes without sockets. Provider failures and
+  cancellation retain their existing binary integration coverage; the installed-binary smoke test still checks only `DONE`.
 - [ ] Preserve benchmark task behavior and existing summary fields. Treat any
   benchmark exit-code change as an explicit adapter migration with reader tests.
   Compare resolved requests, controls, and terminal evidence with deterministic

@@ -90,6 +90,13 @@ impl ContextWindow {
     /// answer beats the table; a failure keeps the configured window and
     /// records why.
     pub async fn discover(self, provider: Provider, model: &str) -> Self {
+        #[cfg(test)]
+        if let Ok(io) = crate::outcome_test_io::ACTIVE.try_with(std::sync::Arc::clone) {
+            use mojentic::llm::gateway::LlmGateway;
+            return self
+                .discover_within(io.get_model_context_window(model), DISCOVERY_TIMEOUT)
+                .await;
+        }
         let gateway = metadata_gateway(provider);
         self.discover_within(gateway.get_model_context_window(model), DISCOVERY_TIMEOUT)
             .await

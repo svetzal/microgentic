@@ -30,3 +30,6 @@ pub mod trace;
 pub mod trace_analysis;
 pub mod transcript;
 mod tui;
+
+#[cfg(test)]
+mod outcome_test_io;

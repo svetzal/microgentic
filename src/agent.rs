@@ -345,6 +345,10 @@ async fn run_agent_entry(
     config: AgentRunConfig,
     conversation: Option<Arc<crate::conversation::ConversationRun>>,
 ) -> Result<AgentRunSummary> {
+    #[cfg(test)]
+    if let Ok(io) = crate::outcome_test_io::ACTIVE.try_with(Arc::clone) {
+        return run_agent_with_gateway(config, io.as_ref(), io.tool_root.clone()).await;
+    }
     let tool_root = PathBuf::from(".")
         .canonicalize()
         .context("canonicalizing harness cwd")?;

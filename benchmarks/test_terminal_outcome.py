@@ -40,7 +40,7 @@ class StructuredOutcomeTests(unittest.TestCase):
         return classify_terminal(events,code,max_iterations=4,max_model_interactions=24)
 
     def test_every_contract_case_gets_its_label(self):
-        # The same file tests/run_outcomes.rs checks the binary against.
+        # The same contract src/cli/run_outcomes.rs verifies through the CLI.
         contract=json.loads(CONTRACT.read_text())
         self.assertEqual(contract['schema_version'],'microgentic_terminal_outcome_contract.v1')
         for case in contract['cases']:

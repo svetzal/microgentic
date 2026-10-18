@@ -116,6 +116,10 @@ pub fn save(path: &Path, preferences: &Preferences) -> Result<()> {
 }
 
 pub fn state_root() -> Result<PathBuf> {
+    #[cfg(test)]
+    if let Ok(root) = crate::outcome_test_io::ACTIVE.try_with(|io| io.state.clone()) {
+        return Ok(root);
+    }
     let base = match std::env::var_os("XDG_STATE_HOME") {
         Some(base) if !base.is_empty() => PathBuf::from(base),
         _ => PathBuf::from(
