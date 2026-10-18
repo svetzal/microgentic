@@ -948,9 +948,7 @@ async fn dispatch(legacy: bool) -> Result<ExitCode> {
             let json = run.json || legacy;
             let mut config = prepare_run(run, cli.config.as_deref(), legacy)?;
             if let Some(window) = config.context_window.take() {
-                let metadata = crate::model_metadata::for_provider(config.provider);
-                config.context_window =
-                    Some(window.discover(metadata.as_ref(), &config.model).await);
+                config.context_window = Some(window.discover(config.provider, &config.model).await);
             }
             let summary = run_agent(config).await?;
             let output = if json {

@@ -275,12 +275,14 @@ far under the 15% limit. The unknown-window guidance fallback of 8,000 tokens
 is still over the 4,800-token limit of the assumed 32,000-token window, and the
 trace reports it as over limit. Window discovery makes that case rare.
 
-**Moving into Mojentic.** The provider window query (`src/model_metadata.rs`)
-and the first-token clock (`src/first_token.rs`) are expected to move into
-Mojentic's gateway and stream metrics, following Mojentic's rule that it
-provides the primitives and applications own the policy. When the pinned
-mojentic-ru revision provides them, switch to the Mojentic API and delete the
-local modules. Residency stays in Microgentic: it is policy.
+**Moving into Mojentic.** The provider window query moved into Mojentic's
+gateway (`LlmGateway::get_model_context_window`, Mojentic 3.0.1), following
+Mojentic's rule that it provides the primitives and applications own the
+policy; `src/model_metadata.rs` is deleted and `ContextWindow::discover` maps
+the gateway's answer onto the same `tokens` and `field`. The first-token clock
+(`src/first_token.rs`) is expected to follow into Mojentic's stream metrics;
+when it does, switch to the Mojentic API and delete that module too. Residency
+stays in Microgentic: it is policy.
 
 ## Decisions
 

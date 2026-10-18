@@ -7,8 +7,12 @@
 //! before, so a discovered window cannot make Ollama allocate a larger cache.
 //! Run policies that read the window (compaction, file observation budgets,
 //! stall projections, conversation trimming) also keep the configured value.
-use crate::model_metadata::ModelMetadata;
+use crate::agent::Provider;
+use mojentic::llm::LlmGateway;
+use mojentic::llm::gateway::ModelContextWindow;
+use mojentic::llm::gateways::{OllamaGateway, OmlxGateway};
 use serde::{Deserialize, Serialize};
+use std::future::Future;
 use std::time::{Duration, Instant};
 
 /// How long discovery may take before the run falls back.
@@ -85,33 +89,36 @@ impl ContextWindow {
     /// Ask the provider unless an explicit window was given. A provider
     /// answer beats the table; a failure keeps the configured window and
     /// records why.
-    pub async fn discover(self, metadata: &dyn ModelMetadata, model: &str) -> Self {
-        self.discover_within(metadata, model, DISCOVERY_TIMEOUT)
+    pub async fn discover(self, provider: Provider, model: &str) -> Self {
+        let gateway = metadata_gateway(provider);
+        self.discover_within(gateway.get_model_context_window(model), DISCOVERY_TIMEOUT)
             .await
     }
 
     async fn discover_within(
         self,
-        metadata: &dyn ModelMetadata,
-        model: &str,
+        lookup: impl Future<Output = mojentic::error::Result<Option<ModelContextWindow>>>,
         limit: Duration,
     ) -> Self {
         if self.source == WindowSource::Explicit {
             return self;
         }
         let started = Instant::now();
-        let answer = tokio::time::timeout(limit, metadata.context_window(model)).await;
+        let answer = tokio::time::timeout(limit, lookup).await;
         let discovery_ms = Some(started.elapsed().as_millis() as u64);
         match answer {
-            Ok(Ok(Some(found))) => Self {
-                tokens: Some(found.tokens),
-                source: WindowSource::Provider,
-                field: Some(found.field),
-                discovery_error: None,
-                discovery_ms,
-                cached: false,
-                advertised_tokens: None,
-            },
+            Ok(Ok(Some(found))) => {
+                let (tokens, field) = accounted(found);
+                Self {
+                    tokens: Some(tokens),
+                    source: WindowSource::Provider,
+                    field: Some(field),
+                    discovery_error: None,
+                    discovery_ms,
+                    cached: false,
+                    advertised_tokens: None,
+                }
+            }
             Ok(Ok(None)) => Self {
                 discovery_error: Some(
                     "the provider does not advertise a window for this model".into(),
@@ -120,7 +127,7 @@ impl ContextWindow {
                 ..self
             },
             Ok(Err(error)) => Self {
-                discovery_error: Some(error),
+                discovery_error: Some(error.to_string()),
                 discovery_ms,
                 ..self
             },
@@ -133,42 +140,57 @@ impl ContextWindow {
     }
 }
 
+/// The gateway that answers the window query, reading the same host and key
+/// environment variables as the gateway the run itself uses.
+fn metadata_gateway(provider: Provider) -> Box<dyn LlmGateway> {
+    match provider {
+        Provider::Omlx => Box::new(OmlxGateway::new()),
+        Provider::Ollama => Box::new(OllamaGateway::new()),
+    }
+}
+
+/// The window Microgentic accounts against and the provider field it came
+/// from. An Ollama model's configured `num_ctx` parameter wins over its
+/// advertised maximum, because Ollama runs the model with it when a request
+/// does not set `num_ctx`; otherwise the advertised maximum stands, from
+/// oMLX's `max_model_len` or Ollama's `model_info.<arch>.context_length`.
+fn accounted(window: ModelContextWindow) -> (usize, String) {
+    match window.model_num_ctx {
+        Some(num_ctx) => (num_ctx, "parameters.num_ctx".into()),
+        None => (window.max_context_tokens.get(), window.field),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model_metadata::ModelContextWindow;
-    use async_trait::async_trait;
+    use mojentic::error::MojenticError;
+    use std::num::NonZeroUsize;
 
-    struct Fixed(Result<Option<ModelContextWindow>, String>);
-
-    #[async_trait]
-    impl ModelMetadata for Fixed {
-        async fn context_window(&self, _: &str) -> Result<Option<ModelContextWindow>, String> {
-            self.0.clone()
+    fn advertised(tokens: usize, field: &str) -> ModelContextWindow {
+        ModelContextWindow {
+            max_context_tokens: NonZeroUsize::new(tokens).unwrap(),
+            field: field.into(),
+            model_num_ctx: None,
         }
     }
 
-    struct Silent;
-
-    #[async_trait]
-    impl ModelMetadata for Silent {
-        async fn context_window(&self, _: &str) -> Result<Option<ModelContextWindow>, String> {
-            std::future::pending().await
-        }
-    }
-
-    fn provider(tokens: usize) -> Fixed {
-        Fixed(Ok(Some(ModelContextWindow {
-            tokens,
-            field: "max_model_len".into(),
-        })))
+    async fn discover(
+        window: ContextWindow,
+        answer: mojentic::error::Result<Option<ModelContextWindow>>,
+    ) -> ContextWindow {
+        window
+            .discover_within(async { answer }, DISCOVERY_TIMEOUT)
+            .await
     }
 
     #[tokio::test]
     async fn the_fallback_order_is_explicit_then_provider_then_table() {
-        let explicit = ContextWindow::configured(Some(8_192), Some(262_144))
-            .discover(&provider(131_072), "m")
-            .await;
+        let explicit = discover(
+            ContextWindow::configured(Some(8_192), Some(262_144)),
+            Ok(Some(advertised(131_072, "max_model_len"))),
+        )
+        .await;
         assert_eq!(
             (explicit.tokens, explicit.source),
             (Some(8_192), WindowSource::Explicit)
@@ -178,9 +200,11 @@ mod tests {
             "an explicit window skips discovery"
         );
 
-        let discovered = ContextWindow::configured(None, Some(262_144))
-            .discover(&provider(131_072), "m")
-            .await;
+        let discovered = discover(
+            ContextWindow::configured(None, Some(262_144)),
+            Ok(Some(advertised(131_072, "max_model_len"))),
+        )
+        .await;
         assert_eq!(
             (
                 discovered.tokens,
@@ -190,9 +214,7 @@ mod tests {
             (Some(131_072), WindowSource::Provider, Some("max_model_len"))
         );
 
-        let table = ContextWindow::configured(None, Some(262_144))
-            .discover(&Fixed(Ok(None)), "m")
-            .await;
+        let table = discover(ContextWindow::configured(None, Some(262_144)), Ok(None)).await;
         assert_eq!(
             (table.tokens, table.source),
             (Some(262_144), WindowSource::FallbackTable)
@@ -204,14 +226,66 @@ mod tests {
                 .contains("does not advertise")
         );
 
-        let unknown = ContextWindow::configured(None, None)
-            .discover(&Fixed(Err("HTTP 404".into())), "m")
-            .await;
+        let unknown = discover(
+            ContextWindow::configured(None, None),
+            Err(MojenticError::GatewayError(
+                "Failed to show model m: 404 Not Found".into(),
+            )),
+        )
+        .await;
         assert_eq!(
             (unknown.tokens, unknown.source),
             (None, WindowSource::Unknown)
         );
-        assert_eq!(unknown.discovery_error.as_deref(), Some("HTTP 404"));
+        assert!(
+            unknown
+                .discovery_error
+                .as_deref()
+                .unwrap()
+                .contains("404 Not Found")
+        );
+    }
+
+    #[tokio::test]
+    async fn an_ollama_num_ctx_parameter_wins_because_the_model_runs_with_it() {
+        let both = discover(
+            ContextWindow::configured(None, None),
+            Ok(Some(ModelContextWindow {
+                model_num_ctx: Some(32_768),
+                ..advertised(262_144, "model_info.qwen4_exp.context_length")
+            })),
+        )
+        .await;
+        assert_eq!(
+            (both.tokens, both.field.as_deref()),
+            (Some(32_768), Some("parameters.num_ctx"))
+        );
+
+        let only_num_ctx = discover(
+            ContextWindow::configured(None, None),
+            Ok(Some(ModelContextWindow {
+                model_num_ctx: Some(8_192),
+                ..advertised(8_192, "parameters.num_ctx")
+            })),
+        )
+        .await;
+        assert_eq!(
+            (only_num_ctx.tokens, only_num_ctx.field.as_deref()),
+            (Some(8_192), Some("parameters.num_ctx"))
+        );
+
+        let length_only = discover(
+            ContextWindow::configured(None, None),
+            Ok(Some(advertised(
+                262_144,
+                "model_info.qwen4_exp.context_length",
+            ))),
+        )
+        .await;
+        assert_eq!(
+            (length_only.tokens, length_only.field.as_deref()),
+            (Some(262_144), Some("model_info.qwen4_exp.context_length"))
+        );
     }
 
     #[test]
@@ -233,7 +307,7 @@ mod tests {
     #[tokio::test]
     async fn a_silent_provider_times_out_and_falls_back() {
         let window = ContextWindow::configured(None, Some(262_144))
-            .discover_within(&Silent, "m", Duration::from_millis(20))
+            .discover_within(std::future::pending(), Duration::from_millis(20))
             .await;
         assert_eq!(window.source, WindowSource::FallbackTable);
         assert_eq!(

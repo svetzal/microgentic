@@ -797,6 +797,35 @@ fn an_everyday_run_discovers_the_context_window_ollama() {
     discovered_window(Wire::Ollama);
 }
 
+/// An Ollama model's `num_ctx` parameter is the window it runs at when a
+/// request sends none, so it is the discovered window whether or not the
+/// model also advertises a `context_length`.
+#[test]
+fn an_ollama_num_ctx_parameter_is_the_discovered_window() {
+    let workspace = Workspace::new();
+    let resolved = |provider: &MockProvider| {
+        let summary = everyday_json(provider, &workspace, "Hello!");
+        trace_payloads(&trace_of(&summary), "context.window.resolved")
+            .pop()
+            .expect("the window is traced")
+    };
+    let only_num_ctx = MockProvider::replying(Wire::Ollama, vec![content("Hello.")]);
+    only_num_ctx.advertise_num_ctx_parameter(Some(16_384));
+    let window = resolved(&only_num_ctx);
+    assert_eq!(window["tokens"], 16_384);
+    assert_eq!(window["source"], "provider");
+    assert_eq!(window["field"], "parameters.num_ctx");
+    assert!(window.get("advertised_tokens").is_none(), "{window}");
+
+    let both = MockProvider::replying(Wire::Ollama, vec![content("Hello.")]);
+    both.advertise_window(Some(262_144));
+    both.advertise_num_ctx_parameter(Some(16_384));
+    let window = resolved(&both);
+    assert_eq!(window["tokens"], 16_384);
+    assert_eq!(window["field"], "parameters.num_ctx");
+    assert!(window.get("advertised_tokens").is_none(), "{window}");
+}
+
 // ---------------------------------------------------------------- residency settings
 
 /// A run flag beats config.json, which beats the default, and explicit
