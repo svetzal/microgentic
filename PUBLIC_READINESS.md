@@ -1,8 +1,10 @@
 # Microgentic public CLI readiness checklist
 
-Started: 2026-10-13. Reviewed: 2026-10-14. Status: v0.3.0 published through
-Homebrew, with an ongoing streaming conversation and project guidance. Open
-questions answered on 2026-10-15. Remaining proposals are identified below.
+Started: 2026-10-13. Reviewed: 2026-10-14 and 2026-10-17. Status: v0.4.0
+published through Homebrew, plus Unreleased context-window discovery and
+context residency measurement. The release has a streaming conversation,
+project guidance, everyday `run` replies, and a user guide. Open questions
+answered on 2026-10-15. Open boxes below are work not yet done.
 
 Build Microgentic as an adaptive coding agent optimized for small models that
 need extra help staying on task. Give it a small, simple, fast interface with
@@ -124,6 +126,9 @@ constructs an oMLX gateway.
 - [ ] Add bounded connectivity checks and actual model discovery for oMLX and Ollama.
   Let setup review the selected endpoint, model, and effort before saving.
   Help and local configuration inspection must remain offline.
+  Progress: TUI `/model` lists the provider's models (CHANGELOG 0.2.0), and
+  Unreleased discovers the context window. Setup connectivity checks and
+  model discovery remain.
 - [ ] Report unavailable servers, missing models, credential problems, and unknown
   capabilities with an actionable next step. Do not infer effort support from
   an accepted flag or imply that model discovery proves tool/streaming support.
@@ -317,11 +322,18 @@ the first public alpha usable; P2 extends it after core workflows work.
   points. Keep research controls in documented advanced configuration, with an
   explicit migration period for existing scripts. Adapt benchmark adapters to
   the public UX; preserve frozen experiments through their pinned artifacts.
-- [ ] **Implement the naming migration.** Update package/binary metadata, help,
+  Progress: prompt-source errors and `--provider`, `--model` and
+  `--reasoning-effort` overrides ship (book `shell.md`), and `--json` is a
+  plain output mode. Further output modes, sessions and skill installation
+  remain.
+- [x] **Implement the naming migration.** Update package/binary metadata, help,
   documentation, completions, and release artifacts to Microgentic/`microgentic`.
   Preserve historical evidence and document compatibility for existing
   `adaptive-agent-harness` invocations. Alias setup must be explicit and must
   not overwrite an existing command or shell alias.
+  Note: shipped in 0.1.0 (CHANGELOG). The compatibility executable and the
+  opt-in `mg` alias are documented in book `install.md` and `benchmark.md`.
+  Completions are tracked under "Ship completions and a companion skill".
 - [x] **Implement the initial name and grammar.** Cargo package and canonical
   command are `microgentic`; the old executable/library remain compatible.
   Bare invocation opens the first TUI; setup previews/saves provider/model/effort.
@@ -335,9 +347,14 @@ the first public alpha usable; P2 extends it after core workflows work.
   stdout, and stderr redirection without requiring the TUI. Define piped input
   roles, EOF behavior, clean result output, non-interactive execution, and broken
   pipe cleanup. Verify the shell composition cases below before public release.
-- [ ] **Resolve project scope once.** Support `--dir`, default to cwd, and use
+  Progress: stdin, `--prompt`, reference stdin, clean stdout and separate
+  stderr ship (book `shell.md`). Broken-pipe cleanup, child-stdin isolation
+  and the verification cases below remain.
+- [x] **Resolve project scope once.** Support `--dir`, default to cwd, and use
   the resolved root for tools, shell, instructions, and display. Store session
   artifacts outside model-visible project files by default.
+  Note: book `shell.md` ("Choose the project") and `locations.md` (run state
+  and traces outside the project).
 - [ ] **Define plan/apply semantics.** Preview concrete edits and command effects;
   retain the approved proposal instead of regenerating it on apply. Planning
   must not run arbitrary mutating shell. Label provider usage and session writes.
@@ -389,6 +406,9 @@ identified by source review, not newly executed benchmark results.
   runners, and collection/analysis integrations for `microgentic` and the new
   flags/configuration. Supply explicit provider settings and authorized execution
   policy; benchmark runs must not enter setup, the TUI, or an approval prompt.
+  Progress: the Pier and Harbor adapters and their tests select
+  `microgentic benchmark run` (`benchmarks/cli-migration/`; book
+  `benchmark.md`). Generation runners and collection/analysis scripts remain.
 - [ ] **Consume structured outcomes.** Parse documented JSON/JSONL and typed
   terminal status, with trace evidence for diagnosis. Distinguish incomplete work,
   provider failure, environment failure, cancellation, and verified success.
@@ -550,6 +570,8 @@ gateway still needs recovery, reasoning, telemetry, and tool-history conformance
 - [ ] **Protect local records.** Document config/state/cache locations, file
   permissions, retention, removal, and sharing. Separate exact research traces
   from redacted exports and label non-exact evidence.
+  Progress: locations and removal are documented in book `locations.md`.
+  Permissions, retention, sharing and redacted exports remain.
 - [ ] **Treat repository content as input.** Define trust for project settings,
   instructions, commands, and external tools. Prevent untrusted configuration
   from silently changing credential destinations or execution permissions.
@@ -560,6 +582,8 @@ gateway still needs recovery, reasoning, telemetry, and tool-history conformance
   `--quiet`, and `--verbose` consistently. Results go to stdout; progress and
   diagnostics go to stderr. Test the shell composition contract, non-TTY runs,
   and `NO_COLOR`; output redirection must not change the task's meaning.
+  Progress: `--json` and the stdout/stderr split ship (book `shell.md`).
+  JSONL events, `--quiet` and `--verbose` remain.
 - [ ] **Make help teach the workflow.** Add summaries, examples at every level,
   mutation labels, typo suggestions, and actionable errors. Disclose research
   settings progressively.
@@ -734,9 +758,9 @@ alias mg=microgentic
 Use `microgentic` in official examples and automation so they work independently
 of a user's aliases. The Cargo package and primary executable now use the chosen
 name, with the old executable retained for compatibility. The upstream is now
-`svetzal/microgentic`; v0.1.0 is published through `svetzal/tap`. Brand/domain
+`svetzal/microgentic`; releases are published through `svetzal/tap`. Brand/domain
 availability remains separate preparation work. Preserved CLI review evidence
-keeps its original names.
+keeps its original names. The current release is v0.4.0.
 
 ## First implementation slices and release gate
 
