@@ -193,8 +193,8 @@ is withheld for new unresolved stashes, missing baseline stashes or an inventory
 that cannot be verified. Existing stashes remain untouched. The agent decides
 how to resolve its work; the harness never pops or drops it automatically.
 Object IDs identify entries, and shared-repository attribution remains uncertain.
-See [stash completion checks](STASH-COMPLETION-2026-10.md) for trace fields,
-deterministic tests and the restored-implementation diagnostic.
+The trace events are `agent.git_stash.entry`, `agent.git_stash.completion_check`,
+`agent.git_stash.done_rejected` and `agent.git_stash.exit`.
 
 ```sh
 cargo build
@@ -261,7 +261,7 @@ The reply goes to stdout without surrounding blank lines, and the exit code is
 With `--experiment`, `--goal` or `--contract`, `run` keeps the task path: the
 task template, DONE/FAIL, continuation prompts and declared probes. The
 `adaptive-agent-harness` executable and `benchmark` commands always use it.
-See [everyday run trials](EVERYDAY-RUN-2026-10.md) for request counts.
+A plain question takes one provider request; an edit with a check takes three.
 
 Everyday runs and the conversation also measure their context, without
 changing it. They ask the provider for the model's context window (oMLX's
@@ -271,8 +271,7 @@ changed by it. The trace records time to first token for every request, and a
 residency record for every item in each request with its reason, size, and
 state. `--standing-context-limit` and `--guidance-fraction`, or the matching
 `config.json` keys, set the limits those records are measured against. See
-[context residency](CONTEXT-RESIDENCY.md) and
-[residency measurement](RESIDENCY-MEASUREMENT-2026-10.md).
+[context residency](CONTEXT-RESIDENCY.md).
 Empty prompts, duplicate `--prompt` flags, positional prompts, and invalid UTF-8
 fail before a provider call. Stdin is limited to 1 MiB.
 
@@ -460,16 +459,12 @@ Benchmark mode uses the pre-UX task prompting, validation authority, DONE/FAIL
 rules, runtime defaults, and research controls. The default provider remains
 oMLX; adapters select their provider explicitly. `--dir` defaults to the current
 directory, as the original tool root did. Existing advanced `run` forms and the
-compatibility executable remain available. See [benchmark mode evidence](MICROGENTIC-BENCHMARK-MODE.md)
-for the preservation boundary and deterministic comparison with the pre-UX source.
+compatibility executable remain available. `tests/benchmark_continuity.rs`
+compares its provider requests and context ledgers with a pre-UX build.
 
 The temporary `adaptive-agent-harness` executable preserves old flags and JSON
 output. Its library import remains `adaptive_agent_harness`. No `mg` executable
 or shell alias is installed. Users can opt into `alias mg=microgentic` themselves.
-
-See [CLI migration evidence](MICROGENTIC-CLI-MIGRATION.md) for deterministic
-checks and benchmark adapter changes, and [TUI conversation evidence](MICROGENTIC-CONVERSATION.md)
-for continuity, streaming, cancellation, and isolation checks.
 
 List the available commands:
 
@@ -594,8 +589,46 @@ values. Unrelated content cannot release a held reasoning credential prefix.
 Captures exclude headers, withhold credential echoes
 and label redaction and exactness. SIGINT and SIGTERM persist terminal lifecycle
 and failure evidence before exit. Recovery budgets begin after failure; they are
-not total-generation timeouts. See [recovery conformance](RECOVERY-CONFORMANCE.md)
-for proof schema, safe capture limits and the external release-worker fixture.
+not total-generation timeouts.
+
+The admission executable is canonicalized outside the model tool root and
+invoked directly, without a shell. It reads this JSON on stdin:
+
+```json
+{
+  "failure": {
+    "identity": {
+      "logical_request_id": "<UUID>",
+      "attempt_id": "<UUID>",
+      "wire_attempt": 1
+    },
+    "http_status": 503,
+    "provider_request_id": "<validated ID or null>",
+    "progress": { "observed": {}, "delivered": {} }
+  },
+  "request_sha256": "<SHA-256 of the immutable encoded HTTP body>"
+}
+```
+
+It must answer on stdout with proof bound to that failure:
+
+```json
+{
+  "decision": "allow",
+  "evidence_kind": "not_forwarded",
+  "previous_attempt_id": "<exact previous UUID>",
+  "logical_request_id": "<exact logical UUID>",
+  "provider_request_id": "<exact input ID or null>",
+  "request_sha256": "<exact input SHA-256>"
+}
+```
+
+`exact_request_terminated` is the other `evidence_kind`, for an operator with
+proof that the exact request terminated. Every binding must match. A missing or
+ambiguous proof, a plain allow, a digest mismatch, a nonzero exit, malformed or
+oversized output, a timeout, or a credential echo rejects admission. The child
+has a five-second bound, a 16 KiB output limit and discarded stderr, and it is
+killed on cancellation.
 
 ### Native initial-context assembly
 
@@ -826,16 +859,6 @@ adding another provider-visible read result. The content bound scales with the
 actual provider window and is capped, while raw read events remain unchanged in
 the trace only. Read-only shell effects do not split a file epoch, but confirmed
 workspace mutations do.
-
-Live trials of the `calculate` tool, and the tuning they led to, are recorded
-in [`CALCULATOR-TRIALS-2026-10.md`](CALCULATOR-TRIALS-2026-10.md).
-Live trials of project guidance discovery are recorded in
-[`GUIDANCE-TRIALS-2026-10.md`](GUIDANCE-TRIALS-2026-10.md).
-Everyday `run` replies, with request counts and live trials, are recorded in
-[`EVERYDAY-RUN-2026-10.md`](EVERYDAY-RUN-2026-10.md).
-The live check of window discovery, time to first token, and residency
-recording is in
-[`RESIDENCY-MEASUREMENT-2026-10.md`](RESIDENCY-MEASUREMENT-2026-10.md).
 
 Experiments are intentionally run from separate, scoped workspaces. Generated
 agents should see their work tree and task-relevant guidance, not experiment

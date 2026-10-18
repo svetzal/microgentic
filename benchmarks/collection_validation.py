@@ -1,4 +1,19 @@
-"""Read-only collection checks against a registered Git baseline."""
+"""Read-only collection checks against a registered Git baseline.
+
+Coordinators call ``verify_original_tests`` after collecting the full Git
+workspace and verifying its binary patch, and before accepting a result or
+dispatching another trial. The baseline is the registered task commit, never a
+revision the agent chose. The collected revision defaults to ``HEAD``, the
+committed workspace used for patch verification. Working-tree inspection and
+patch checks remain separate requirements.
+
+The check compares the Git mode, type and object ID of every ``tests/`` entry
+in the baseline. Added tests pass. Changed content, deletion, rename, an
+executable-bit change or a symlink in place of an original fails. Invalid
+revisions and Git failures fail closed. Run the regression suite with::
+
+    python3 -m unittest discover -s benchmarks -p 'test_collection_validation.py' -v
+"""
 
 from pathlib import Path
 import subprocess

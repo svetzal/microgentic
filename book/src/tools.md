@@ -15,6 +15,14 @@ The shell tool is not a sandbox. A command runs as you, with your environment
 and network access, and can change files outside the project. Use Microgentic in
 a Git repository so that you can examine and undo changes.
 
+## Git stashes
+
+Before the first tool call, Microgentic records the stashes in the project's
+Git repository. Before an exchange or a run ends, it checks them again. A stash
+that the model created and did not resolve, or a stash that disappeared, holds
+the ending back, and the model is told. Microgentic never applies, pops, or
+drops a stash itself. Stashes that existed before the work are left alone.
+
 ## Calculator
 
 Small models make arithmetic mistakes, so the conversation and `run` give the
@@ -34,6 +42,10 @@ The tool takes one `expression` string. Separate expressions with newlines or
 
 A line such as `total = 140 + 90` names a value that later lines in the same
 call can use. Names are case-sensitive and last for one call only.
+
+When some lines in a call fail, the result still gives the answers of the lines
+that succeeded, and each failed line carries its own error. A call with no
+usable line is a tool error.
 
 Decimals stay exact through `+ - * /` and integer powers, so `0.1 + 0.2` is
 `0.3`. Roots, logarithms, fractional powers, and integers larger than 128 bits

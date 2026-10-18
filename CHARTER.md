@@ -32,21 +32,19 @@ The initial Microgentic CLI keeps task preparation and presentation outside the
 runtime policy. Benchmark adapters supply explicit providers and authoritative
 contracts instead of inheriting personal setup defaults. Prove migration fidelity
 with provider requests after tool feedback, not only matching option names.
-See `MICROGENTIC-CLI-MIGRATION.md` for the implementation boundary and checks.
 
 Conversation continuity retains native user, assistant, and tool history, while
 each request resolves fresh task authority and validation state. Never replay old
 system/probe/repair instructions as new task policy or incomplete streams as
 completed responses. Repair pruning must protect the current user task as well as
 earlier conversation prompts. Stream presentation observes the existing runtime;
-benchmark entry points never load ambient conversation history. The deterministic
-boundary checks are in `MICROGENTIC-CONVERSATION.md`.
+benchmark entry points never load ambient conversation history.
 
 An open TUI has no assumed engineering task. The user's conversation supplies
 work requests; ordinary replies can finish without task status tokens. Preserve
 quoted examples as data and keep observational shell checks separate from
 executor-owned acceptance probes. Benchmark task prompting, probe authority, and
-terminal rules remain on the existing task path. See `MICROGENTIC-CHAT.md`.
+terminal rules remain on the existing task path.
 
 Show the TUI evidence footer for project-tool activity in the current exchange.
 Ordinary chat stays free of that footer, including conversational replies after
@@ -58,8 +56,7 @@ Benchmark task mode is explicit: `microgentic benchmark run` and
 setup, stdin intake, and conversation history outside this path. Preserve the
 pre-UX task prompting, validation authority, runtime defaults, and stop rules
 through the shared task runtime. Exact historical reproduction still needs pinned
-binaries, dependencies, adapters, and provider configuration. See
-`MICROGENTIC-BENCHMARK-MODE.md` for the boundary and deterministic checks.
+binaries, dependencies, adapters, and provider configuration.
 
 ## Responsibilities
 
@@ -92,7 +89,6 @@ validate a library change. Use a fresh registered experiment instead.
 The detailed research charter and operating evidence remain in
 `~/Work/Sandbox2/CHARTER.md` and `~/Work/Sandbox2/EXPERIMENTAL_METHOD.md`.
 The repository README describes the current runtime and commands.
-`RECOVERY-INTEGRATION-2026-10.md` defines the authorized recovery integration.
 
 ## Request recovery evidence
 
@@ -110,4 +106,3 @@ before accepting DONE. Existing stashes are baseline evidence, not automatically
 agent-owned work. Never automatically restore or discard stashes. Record shared
 repository attribution as uncertain. A restored implementation must still pass
 its independent verifier; recovery of missing edits alone does not prove quality.
-See `STASH-COMPLETION-2026-10.md` for the deterministic checks and diagnostic.

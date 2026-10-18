@@ -18,7 +18,8 @@ microgentic benchmark run-sequential --experiment ./cell \
 - `--experiment` is required. The task comes from `task.md` in the experiment
   directory, or from `--goal` or `--contract`. A contract takes precedence over
   a goal.
-- The complete JSON summary always goes to stdout.
+- The complete JSON summary always goes to stdout. `--json` is accepted and
+  changes nothing. `--prompt` is rejected.
 - Your saved settings, `--config`, stdin, and conversation history have no
   effect. Give inputs as files.
 - Project guidance is not read, and the calculator is not offered, so provider
