@@ -374,10 +374,9 @@ The source review below describes the pre-migration interface; frozen experiment
 remain unchanged. Container installation and future registered cells need the
 broader gates below.
 
-At the review baseline, the DeepSWE/Pier and Terminal-Bench/Harbor adapters under
-`~/Work/Sandbox2/Benchmarks/deep-swe/adapter/adaptive_harness_agent.py` and
-`~/Work/Sandbox2/Benchmarks/terminal-bench-2.1/adapter/adaptive_harness_agent.py`
-launched `adaptive-agent-harness run` with `--experiment`, `--contract`,
+Historical record: at the review baseline, the two benchmark adapters that
+existed, DeepSWE/Pier and Terminal-Bench/Harbor, launched
+`adaptive-agent-harness run` with `--experiment`, `--contract`,
 `--trace-dir`, model budgets, and policy flags. They also inspected `run.failed`
 trace records after a nonzero process exit. Harbor used `--max-tool-iterations`;
 Pier used `--max-model-interactions`. These were concrete migration points
@@ -402,13 +401,16 @@ identified by source review, not newly executed benchmark results.
   context policy, output, trace destination, and cancellation to the public
   non-interactive interface. Preserve necessary research controls in documented,
   versioned advanced configuration. Keep one runtime execution path.
-- [ ] **Migrate maintained launchers and tests.** Update Pier, Harbor, generation
-  runners, and collection/analysis integrations for `microgentic` and the new
-  flags/configuration. Supply explicit provider settings and authorized execution
-  policy; benchmark runs must not enter setup, the TUI, or an approval prompt.
-  Progress: the Pier and Harbor adapters and their tests select
+- [ ] **Migrate maintained launchers and tests.** Update benchmark adapters,
+  generation runners, and collection/analysis integrations for `microgentic` and
+  the new flags/configuration. The benchmark command must serve any benchmark
+  harness, not one benchmark suite. Supply explicit provider settings and
+  authorized execution policy; benchmark runs must not enter setup, the TUI,
+  or an approval prompt.
+  Progress: the first two adapters (Pier and Harbor) and their tests select
   `microgentic benchmark run` (`benchmarks/cli-migration/`; book
-  `benchmark.md`). Generation runners and collection/analysis scripts remain.
+  `benchmark.md`). Documenting the adapter contract for other harnesses
+  remains.
 - [ ] **Consume structured outcomes.** Parse documented JSON/JSONL and typed
   terminal status, with trace evidence for diagnosis. Distinguish incomplete work,
   provider failure, environment failure, cancellation, and verified success.
@@ -591,8 +593,7 @@ gateway still needs recovery, reasoning, telemetry, and tool-history conformance
   setup. Provide `init` for globally scoped guidance, with `--local` for project
   scope and concrete installation previews. Use shared install infrastructure.
 - [x] **Promote the project home.** Rename the upstream to `svetzal/microgentic`.
-  Use `~/Work/Projects/Personal/microgentic` for product development and keep
-  `~/Work/Sandbox2/Harness` as a separate benchmark integration clone.
+  Use `~/Work/Projects/Personal/microgentic` for product development.
 - [x] **Add the initial release pipeline.** Build and test versioned packages
   for Apple Silicon, Intel Mac, and Linux x86-64. Embed source revision provenance,
   preserve binary and archive checksums, and check a copied executable while its

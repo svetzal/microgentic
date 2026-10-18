@@ -3,9 +3,11 @@
 ## Purpose
 
 Microgentic's primary development checkout is `~/Work/Projects/Personal/microgentic`.
-The upstream repository is `svetzal/microgentic`. Keep `~/Work/Sandbox2/Harness`
-as a separate benchmark integration clone. General-purpose product development
-can proceed independently of registered experiments; preserve their pinned evidence.
+The upstream repository is `svetzal/microgentic`. This repository is general and
+self-contained: it does not refer to any particular experiment repository, and
+experiment repositories depend on it, never the reverse. General-purpose product
+development proceeds independently of registered experiments; preserve their
+pinned evidence.
 Versioned releases and Homebrew packages follow `RELEASING.md`.
 
 This Rust application studies how an adaptive harness can make smaller local
@@ -22,8 +24,10 @@ should feel small, simple, and fast, with Pi as an interaction reference and
 selectable Mojentic gateways. Build session and presentation around the general
 runtime, preserving validation, evidence, and local-model patience.
 
-Design the control surface for end users. Adapt benchmark launchers to its public
-non-interactive interface and documented advanced configuration. Verify equivalent
+Design the control surface for end users. Benchmark harnesses of any kind adapt
+to its public non-interactive interface and documented advanced configuration.
+The benchmark commands serve any harness, not one benchmark suite; today's
+adapters are the first consumers. Verify equivalent
 resolved inputs and runtime behavior before new trials; preserve frozen evidence
 through pinned binaries, adapter revisions, and configuration. The preparation
 backlog is in `PUBLIC_READINESS.md`; proposed features are not implemented behavior.
@@ -69,7 +73,7 @@ Mojentic supplies provider completion, messages, tool abstractions, and tracing
 primitives. Provider-level recovery belongs in Mojentic. The harness owns resource
 admission, experiment policy, session recovery, and trace persistence.
 
-The harness is general. Space Invaders and Igel are benchmark tasks, not its domain.
+The harness is general. No benchmark task is its domain.
 Do not couple runtime policy to one task, language, model, or repository layout.
 Do not hide validation inside an unconstrained model phase.
 
@@ -86,9 +90,9 @@ measured progress and throughput-aware patience.
 Keep historical experiments unchanged. Never restart a stopped benchmark to
 validate a library change. Use a fresh registered experiment instead.
 
-The detailed research charter and operating evidence remain in
-`~/Work/Sandbox2/CHARTER.md` and `~/Work/Sandbox2/EXPERIMENTAL_METHOD.md`.
-The repository README describes the current runtime and commands.
+Research protocol and operating evidence for registered experiments live with
+those experiments, outside this repository. The repository README describes the
+current runtime and commands.
 
 ## Request recovery evidence
 
