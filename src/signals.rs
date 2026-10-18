@@ -14,19 +14,19 @@ use tokio::task::JoinHandle;
 /// How long cooperative shutdown may take before the process ends anyway.
 pub(crate) const GRACE: Duration = Duration::from_secs(2);
 
-/// Watch for a termination signal. `request` runs once, on the first signal.
-/// `force` runs with that signal's number if the process is still alive
-/// after `grace` or when a second signal arrives, and must not return.
-/// Abort the returned task once the work has ended on its own.
+/// Watch for a termination signal. `request` runs once, with the first
+/// signal's number. `force` runs with that same number if the process is
+/// still alive after `grace` or when a second signal arrives, and must not
+/// return. Abort the returned task once the work has ended on its own.
 pub(crate) fn on_termination<R, F>(grace: Duration, request: R, force: F) -> Result<JoinHandle<()>>
 where
-    R: FnOnce() + Send + 'static,
+    R: FnOnce(i32) + Send + 'static,
     F: FnOnce(i32) + Send + 'static,
 {
     let mut signals = Signals::new().context("registering termination signals")?;
     Ok(tokio::spawn(async move {
         let first = signals.next().await;
-        request();
+        request(first);
         tokio::select! {
             _ = tokio::time::sleep(grace) => {}
             _ = signals.next() => {}

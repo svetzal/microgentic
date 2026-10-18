@@ -13,6 +13,7 @@ pub mod first_token;
 pub mod guidance;
 pub mod initial_context;
 pub mod model_metadata;
+pub mod outcome;
 pub mod preferences;
 pub mod profile;
 pub mod provenance;

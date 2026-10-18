@@ -366,10 +366,29 @@ fn compare(baseline: &Path, current: &Path, mode: Mode, case: Case, wire: Wire) 
         keys.sort();
         keys
     };
-    assert_eq!(
-        keys(&old.summary),
-        keys(&new.summary),
-        "{label}: summary schema changed"
+    // The summary schema may only grow, and only by the documented additive
+    // fields; every historical key stays.
+    let (old_keys, new_keys) = (keys(&old.summary), keys(&new.summary));
+    let removed: Vec<&String> = old_keys
+        .iter()
+        .filter(|key| !new_keys.contains(key))
+        .collect();
+    assert!(
+        removed.is_empty(),
+        "{label}: summary keys removed: {removed:?}"
+    );
+    let added: Vec<String> = new_keys
+        .iter()
+        .filter(|key| !old_keys.contains(key))
+        .cloned()
+        .collect();
+    let unexpected: Vec<&String> = added
+        .iter()
+        .filter(|key| !ADDITIVE_SUMMARY_KEYS.contains(&key.as_str()))
+        .collect();
+    assert!(
+        unexpected.is_empty(),
+        "{label}: undocumented new summary keys: {unexpected:?}"
     );
     if case == Case::Sequential {
         let attempts =
@@ -405,9 +424,14 @@ fn compare(baseline: &Path, current: &Path, mode: Mode, case: Case, wire: Wire) 
         "provider_json_equal": true,
         "exact_snapshots_equal": true,
         "context_ledgers_equal": true,
-        "summary_schema_equal": true,
+        "summary_schema_equal": added.is_empty(),
+        "summary_schema_additive_keys": added,
     })
 }
+
+/// Summary fields added since the first public release, each documented as
+/// additive: `outcome` (added after 0.4.0) says how the run ended.
+const ADDITIVE_SUMMARY_KEYS: &[&str] = &["outcome"];
 
 fn current_binary() -> PathBuf {
     PathBuf::from(microgentic())

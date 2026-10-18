@@ -12,6 +12,21 @@ The release workflow publishes each version's section as its GitHub release note
 
 ### Added
 
+- One typed outcome for every run, decided by the runtime rather than by the
+  model's prose: `replied`, `done`, `failed`, `withheld` (by the Git stash,
+  validation, probe, or acceptance-ledger gate), `hard_stop` (action boundary,
+  thinking only, empty response, repair without action, repair depth,
+  inspection loop, no-content stream, or iteration budget), `cancelled`,
+  `error`, and `usage`. The run summary gains an `outcome` field, in `--json`,
+  in benchmark JSON, and in the `run.finished` trace event; the existing
+  fields are unchanged. Each attempt record of `run-sequential` carries the
+  same field. When a `run` does not succeed, stderr gets one `microgentic:`
+  line naming the outcome and the trace, and a conversation exchange that
+  ends without a completed reply shows the same line and a `Stopped` status.
+  The two stops raised inside a model stream (inspection loop, no-content
+  stream) still end the run as an error, and their `run.failed` trace
+  record's `error` text now opens with the outcome line before the
+  original summary.
 - Everyday `run` and the conversation ask the provider for the selected
   model's context window: oMLX's `max_model_len` from `/v1/models`, and
   Ollama's `num_ctx` parameter or `<arch>.context_length` from `/api/show`.
@@ -44,6 +59,15 @@ The release workflow publishes each version's section as its GitHub release note
 
 ### Changed
 
+- `microgentic run` exits with its outcome: 0 for a completed reply or an
+  accepted `DONE`, 3 for a returned `FAIL`, 4 for a withheld completion, 5
+  for a runtime stop, 1 for an error, 2 for a usage error, and 128 plus the
+  signal number when a termination signal ends the run (130, 143, 129), the
+  same status the forced exit already used. The run's own usage errors (an
+  empty or missing prompt, a `--dir` that is not a directory) now exit 2
+  rather than 1. `benchmark run`, `benchmark run-sequential`,
+  `run-sequential`, and the `adaptive-agent-harness` executable keep exit 0
+  on a summary and 1 on an error.
 - The context panel shows each element's inclusion reason and residency
   state (pinned, the turn that added it, the last reference, demoted), and
   marks the tools as pinned. With a known window, the panel header and the

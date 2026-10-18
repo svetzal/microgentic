@@ -3,6 +3,7 @@ use crate::acceptance_interactions::{
 };
 use crate::acceptance_ledger::{AcceptanceLedgerSnapshot, AcceptanceLedgerSpec};
 use crate::acceptance_plan::{DEFAULT_MAX_PLAN_ITEMS, plan_acceptance_with_gateway};
+use crate::outcome::{HardStopCause, RunOutcome, WithheldGate};
 use crate::sha256::sha256_hex;
 use crate::tools::{
     SuccessfulValidationSnapshot, ToolPolicySnapshot, ToolScope, ToolSurface,
@@ -22,6 +23,7 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::time::{Duration, Instant};
 use tokio::process::Command;
 use tokio::time::MissedTickBehavior;
@@ -186,6 +188,8 @@ pub struct AgentRunSummary {
     pub advisory_selected_context_ids: Vec<String>,
     pub excluded_initial_context_ids: Vec<String>,
     pub final_summary: String,
+    /// How the run ended, as the runtime established it.
+    pub outcome: RunOutcome,
     pub harness_source_state: crate::provenance::HarnessSourceState,
 }
 
@@ -341,9 +345,16 @@ async fn run_agent_entry(
     // through this one token. Work that does not notice within the grace
     // period is ended anyway, with the signal's conventional status.
     let requested = cancellation.clone();
+    // The signal that asked the run to stop, so its error can say so; 0 when
+    // none has.
+    let termination = Arc::new(AtomicI32::new(0));
+    let recorded = termination.clone();
     let signal = crate::signals::on_termination(
         crate::signals::GRACE,
-        move || requested.cancel(),
+        move |signal| {
+            recorded.store(signal, Ordering::SeqCst);
+            requested.cancel();
+        },
         |signal| {
             // Standard error may be gone with the parent, so a failed write
             // must not panic this task before the exit below.
@@ -381,7 +392,10 @@ async fn run_agent_entry(
     let settled = evidence.settle().await;
     signal.abort();
     match result {
-        Err(error) => Err(error),
+        Err(error) => match termination.load(Ordering::SeqCst) {
+            0 => Err(error),
+            signal => Err(error.context(RunOutcome::Cancelled { signal })),
+        },
         Ok(summary) => {
             settled?;
             Ok(summary)
@@ -919,8 +933,14 @@ async fn run_agent_with_gateway_inner<G: LlmGateway + ?Sized>(
     scope.observe_runtime(crate::runtime::RuntimeEvent::RunStarted);
     let requested_validation_completed_write_operations = 0usize;
     let mut exhausted_iterations = true;
+    // How the run ended, set wherever the loop stops. A gate that withholds a
+    // claimed completion records itself for the turn; it becomes the outcome
+    // only when the iteration budget then runs out.
+    let mut outcome: Option<RunOutcome> = None;
+    let mut withheld: Option<(WithheldGate, String)> = None;
     let no_tools: Vec<Box<dyn LlmTool>> = Vec::new();
     for turn in 1..=config.max_iterations {
+        withheld = None;
         scope.observe_runtime(crate::runtime::RuntimeEvent::TurnStarted { turn });
         if let Some(mut metadata) = pending_reasoning_checkpoint_delivery.take() {
             metadata["delivery_turn"] = serde_json::json!(turn);
@@ -1189,11 +1209,13 @@ async fn run_agent_with_gateway_inner<G: LlmGateway + ?Sized>(
         {
             final_summary = repair_hard_failure_summary(decision);
             trace.event("agent.validation.repair_hard_failed", decision)?;
+            outcome = Some(hard_stop(HardStopCause::RepairNoAction, &final_summary));
             exhausted_iterations = false;
             break;
         }
         if let Some(decision) = &repair_depth_hard_stop {
             final_summary = repair_depth_failure_summary(decision);
+            outcome = Some(hard_stop(HardStopCause::RepairDepth, &final_summary));
             exhausted_iterations = false;
             break;
         }
@@ -1225,6 +1247,7 @@ async fn run_agent_with_gateway_inner<G: LlmGateway + ?Sized>(
             if decision.escalation_required {
                 final_summary = action_boundary_no_action_failure_summary(decision);
                 trace.event("agent.action_boundary.hard_failed", decision)?;
+                outcome = Some(hard_stop(HardStopCause::ActionBoundary, &final_summary));
                 exhausted_iterations = false;
                 break;
             }
@@ -1380,6 +1403,7 @@ async fn run_agent_with_gateway_inner<G: LlmGateway + ?Sized>(
                             "final_summary": final_summary,
                         }),
                     )?;
+                    outcome = Some(hard_stop(HardStopCause::ThinkingOnly, &final_summary));
                     exhausted_iterations = false;
                     break;
                 }
@@ -1496,6 +1520,7 @@ async fn run_agent_with_gateway_inner<G: LlmGateway + ?Sized>(
                         "final_summary": final_summary,
                     }),
                 )?;
+                outcome = Some(hard_stop(HardStopCause::EmptyResponse, &final_summary));
                 exhausted_iterations = false;
                 break;
             }
@@ -1520,6 +1545,7 @@ async fn run_agent_with_gateway_inner<G: LlmGateway + ?Sized>(
                 trace.event("agent.git_stash.done_rejected", &comparison)?;
                 final_summary = "FAIL unresolved Git stash state at completion".to_string();
                 final_response_only_next_turn = false;
+                withheld = Some((WithheldGate::Stash, comparison.summary()));
                 messages.push(LlmMessage::user(comparison.prompt()));
                 continue;
             }
@@ -1533,6 +1559,10 @@ async fn run_agent_with_gateway_inner<G: LlmGateway + ?Sized>(
                     "policy": policy,
                 }),
             )?;
+            withheld = Some((
+                WithheldGate::Validation,
+                "edits were not validated before the reply".to_string(),
+            ));
             messages.push(LlmMessage::user(profile.post_write_validation_nudge(true)));
             continue;
         }
@@ -1547,6 +1577,10 @@ async fn run_agent_with_gateway_inner<G: LlmGateway + ?Sized>(
                     "ledger": requested_validation_ledger,
                 }),
             )?;
+            withheld = Some((
+                WithheldGate::Probes,
+                requested_validation_ledger.incomplete_account(),
+            ));
             messages.push(LlmMessage::user(done_rejected_prompt(
                 &requested_validation_ledger,
             )));
@@ -1564,6 +1598,14 @@ async fn run_agent_with_gateway_inner<G: LlmGateway + ?Sized>(
                         "authority": "coverage_only",
                     }),
                 )?;
+                withheld = Some((
+                    WithheldGate::AcceptanceLedger,
+                    format!(
+                        "acceptance coverage incomplete for mutation epoch {}: {}",
+                        acceptance.mutation_epoch,
+                        acceptance.incomplete_ids.join(", ")
+                    ),
+                ));
                 messages.push(LlmMessage::user(acceptance_ledger_done_rejected_prompt(
                     &acceptance,
                 )));
@@ -1571,13 +1613,11 @@ async fn run_agent_with_gateway_inner<G: LlmGateway + ?Sized>(
             }
         }
         if conversational_reply && policy.validation_repair.is_none() {
-            if let Some(session) = &conversation {
-                session.complete_reply();
-            }
             trace.event(
                 "session.reply.completed",
                 serde_json::json!({"turn": turn, "completion": "visible_conversation_reply"}),
             )?;
+            outcome = Some(RunOutcome::Replied);
             exhausted_iterations = false;
             break;
         }
@@ -1588,6 +1628,12 @@ async fn run_agent_with_gateway_inner<G: LlmGateway + ?Sized>(
                 for legacy in crate::runtime_events::legacy_trace_events(&event) {
                     trace.event(legacy.kind, legacy.payload)?;
                 }
+                outcome = Some(match token {
+                    crate::runtime::TerminalToken::Done => RunOutcome::Done,
+                    crate::runtime::TerminalToken::Fail => RunOutcome::Failed {
+                        reason: final_summary.clone(),
+                    },
+                });
             }
             exhausted_iterations = false;
             break;
@@ -1636,6 +1682,16 @@ async fn run_agent_with_gateway_inner<G: LlmGateway + ?Sized>(
         ));
     }
 
+    let outcome = outcome.unwrap_or_else(|| match withheld.take() {
+        Some((gate, detail)) => RunOutcome::Withheld { gate, detail },
+        None => RunOutcome::HardStop {
+            cause: HardStopCause::IterationBudget,
+            detail: format!(
+                "{} turns used; last: {final_summary}",
+                config.max_iterations
+            ),
+        },
+    });
     if exhausted_iterations {
         let final_policy = scope.policy_snapshot();
         if final_policy.validation_required_after_write {
@@ -1696,11 +1752,25 @@ async fn run_agent_with_gateway_inner<G: LlmGateway + ?Sized>(
         advisory_selected_context_ids: initial_context.advisory_selected_ids,
         excluded_initial_context_ids: initial_context.excluded_ids,
         final_summary,
+        outcome,
         harness_source_state,
     };
     trace.event("run.finished", &summary)?;
     trace.conversation_checkpoint(&messages);
     Ok(summary)
+}
+
+fn hard_stop(cause: HardStopCause, detail: &str) -> RunOutcome {
+    RunOutcome::HardStop {
+        cause,
+        detail: detail.to_string(),
+    }
+}
+
+/// A hard stop raised inside a stream: the error keeps the summary as its
+/// cause and carries the outcome for the command line to classify.
+fn hard_stop_error(cause: HardStopCause, summary: String) -> anyhow::Error {
+    anyhow::anyhow!("{summary}").context(hard_stop(cause, &summary))
 }
 
 fn trace_run_failed(
@@ -1969,6 +2039,26 @@ impl RequestedValidationLedger {
                     || entry.generation != Some(self.generation)
             })
             .collect()
+    }
+
+    /// One line naming each probe or command that has not passed for the
+    /// latest source state, for the run outcome.
+    fn incomplete_account(&self) -> String {
+        self.incomplete_entries()
+            .into_iter()
+            .map(|entry| {
+                let status = match entry.status {
+                    RequestedValidationStatus::Pending => "missing",
+                    RequestedValidationStatus::Passed | RequestedValidationStatus::Stale => "stale",
+                    RequestedValidationStatus::Failed => "failed",
+                };
+                match &entry.probe_id {
+                    Some(probe_id) => format!("probe `{probe_id}` {status}"),
+                    None => format!("`{}` {status}", entry.command),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("; ")
     }
 }
 
@@ -2930,9 +3020,12 @@ async fn stream_response<G: LlmGateway + ?Sized>(
                                 "stream_progress_frame_count": stream_progress_frame_count,
                             }),
                         )?;
-                        anyhow::bail!(
-                            "no assistant content after {no_content_segment_eval_count} observed output tokens since the latest content or tool call; expected output budget was {expected_output_tokens}"
-                        );
+                        return Err(hard_stop_error(
+                            HardStopCause::NoContentStream,
+                            format!(
+                                "no assistant content after {no_content_segment_eval_count} observed output tokens since the latest content or tool call; expected output budget was {expected_output_tokens}"
+                            ),
+                        ));
                     }
                 }
                 Err(error) => {
@@ -3082,7 +3175,10 @@ async fn stream_response<G: LlmGateway + ?Sized>(
                 inspection_loop_tracker.observe(turn, depth, call, &tool_result, profile)
             {
                 trace.event("agent.inspection_loop.hard_failed", &decision)?;
-                anyhow::bail!("{}", inspection_loop_failure_summary(&decision));
+                return Err(hard_stop_error(
+                    HardStopCause::InspectionLoop,
+                    inspection_loop_failure_summary(&decision),
+                ));
             }
             if is_meaningful_source_edit(call, &tool_result, profile) {
                 requested_validation_pending_after_write = true;

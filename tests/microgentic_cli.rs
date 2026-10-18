@@ -31,6 +31,56 @@ fn missing_or_invalid_intake_never_starts_a_provider() {
     assert!(!config.exists());
 }
 
+/// Bad input to `run` is a usage error, status 2, whether clap or the
+/// intake itself finds it.
+#[test]
+fn usage_errors_exit_two() {
+    use std::io::Write;
+    let temp = tempfile::tempdir().unwrap();
+    let file = temp.path().join("not-a-directory");
+    std::fs::write(&file, "x").unwrap();
+    let file = file.display().to_string();
+    for (args, stdin, message) in [
+        // Nothing on a closed stdin and no --prompt.
+        (vec!["run"], "", "run requires a nonempty prompt"),
+        (
+            vec!["run", "--prompt", ""],
+            "",
+            "--prompt must not be empty",
+        ),
+        // Blank stdin is no prompt either.
+        (vec!["run"], " \n\n", "run requires a nonempty prompt"),
+        (
+            vec!["run", "--prompt", "Hi", "--dir", &file],
+            "",
+            "--dir must name a project directory",
+        ),
+        (vec!["run", "positional"], "", "unexpected argument"),
+    ] {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_microgentic"))
+            .arg("--config")
+            .arg(temp.path().join("config.json"))
+            .args(&args)
+            .env("OMLX_HOST", "http://127.0.0.1:1")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(stdin.as_bytes())
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(2), "{args:?}: {stderr}");
+        assert!(stderr.contains(message), "{args:?}: {stderr}");
+        assert!(output.stdout.is_empty());
+    }
+}
+
 #[test]
 fn benchmark_help_and_errors_explain_isolated_file_intake() {
     let help = worker()

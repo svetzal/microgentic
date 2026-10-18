@@ -7,6 +7,7 @@
 //! artifact.
 
 use crate::agent::{AgentRunConfig, run_agent};
+use crate::outcome::RunOutcome;
 use crate::runtime_events;
 use crate::sha256::sha256_hex;
 use crate::trace_analysis::analyze_trace;
@@ -64,6 +65,9 @@ pub struct SequentialAttemptRecord {
     pub runtime_seconds: Option<f64>,
     pub observed_output_tokens: usize,
     pub final_summary: String,
+    /// How the attempt's run ended; an inner run error is `Error` unless the
+    /// error carried a more specific outcome.
+    pub outcome: RunOutcome,
     pub terminal_error: Option<String>,
 }
 
@@ -142,15 +146,27 @@ pub async fn run_sequential(config: SequentialRunConfig) -> Result<SequentialRun
         let trace_dir = experiment_dir.join("traces");
         let traces_before = trace_paths(&trace_dir)?;
         let run_result = run_agent(config.agent.clone()).await;
-        let (trace_file, final_summary, terminal_error) = match run_result {
-            Ok(summary) => (summary.trace_file, summary.final_summary, None),
+        let (trace_file, final_summary, outcome, terminal_error) = match run_result {
+            Ok(summary) => (
+                summary.trace_file,
+                summary.final_summary,
+                summary.outcome,
+                None,
+            ),
             Err(error) => {
                 let trace_file = newly_failed_trace(&trace_dir, &traces_before, &tool_root)
                     .with_context(|| format!("adopting trace after inner run error: {error:#}"))?;
+                let outcome = error
+                    .downcast_ref::<RunOutcome>()
+                    .cloned()
+                    .unwrap_or_else(|| RunOutcome::Error {
+                        message: format!("{error:#}"),
+                    });
                 let error = format!("{error:#}");
                 (
                     trace_file,
                     format!("inner run failed: {error}"),
+                    outcome,
                     Some(error),
                 )
             }
@@ -185,6 +201,7 @@ pub async fn run_sequential(config: SequentialRunConfig) -> Result<SequentialRun
             runtime_seconds: analysis.runtime_seconds,
             observed_output_tokens: analysis.observed_output_tokens,
             final_summary,
+            outcome,
             terminal_error,
         };
         let decision = stop_after_attempt(&record, &attempts, limits);
@@ -485,6 +502,18 @@ mod tests {
             runtime_seconds: Some(1.0),
             observed_output_tokens: 10,
             final_summary: String::new(),
+            outcome: if done {
+                RunOutcome::Done
+            } else if fail {
+                RunOutcome::Failed {
+                    reason: "FAIL".into(),
+                }
+            } else {
+                RunOutcome::HardStop {
+                    cause: crate::outcome::HardStopCause::IterationBudget,
+                    detail: String::new(),
+                }
+            },
             terminal_error: None,
         }
     }

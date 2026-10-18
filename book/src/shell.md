@@ -50,9 +50,10 @@ to continue after it replies.
 
 A termination signal also ends the run: SIGINT from Ctrl-C, SIGTERM from
 `kill`, or SIGHUP when the terminal closes. The model request is cancelled, a
-project command that is still running is killed, and the run exits with an
-error. If the work has not stopped two seconds later, or a second signal
-arrives, the process exits at once with the signal's conventional status.
+project command that is still running is killed, and the run exits with the
+signal's conventional status, 128 plus the signal number. If the work has not
+stopped two seconds later, or a second signal arrives, the process exits at
+once with the same status.
 
 `run --experiment`, `--goal` or `--contract` starts a task run instead. Task
 runs keep the task instructions, the DONE/FAIL ending, and declared probes.
@@ -69,6 +70,50 @@ microgentic run --prompt 'Summarize the public API' >> summaries.txt
 ```
 
 `--json` writes the complete run summary as JSON instead of the reply text.
+Its `outcome` field says how the run ended: `{"kind": "replied"}`,
+`{"kind": "done"}`, `{"kind": "failed", "reason": "…"}`,
+`{"kind": "withheld", "gate": "…", "detail": "…"}`, or
+`{"kind": "hard_stop", "cause": "…", "detail": "…"}`. The other fields are
+unchanged.
+
+## Exit status
+
+The exit status says how the run ended, so a script can branch on it without
+reading the reply:
+
+| Code | Meaning |
+| --- | --- |
+| 0 | The reply finished, or the runtime accepted a task's `DONE` |
+| 1 | A provider, environment, or internal error |
+| 2 | A usage error |
+| 3 | The model returned `FAIL` |
+| 4 | A gate withheld the claimed completion until the iteration budget ran out |
+| 5 | A runtime rule stopped the run |
+| 128 + signal | A termination signal ended the run: 130, 143, or 129 |
+
+When the status is not 0, stderr has one line that starts with `microgentic:`.
+It names the outcome and gives the trace path:
+
+```text
+microgentic: FAIL returned: FAIL the fixture file is missing; evidence: /Users/you/.local/state/microgentic/runs/…/trace.jsonl
+```
+
+stdout still has the reply, or the JSON summary with `--json`.
+
+```sh
+if microgentic run --prompt 'Fix the parser' > reply.md; then
+  echo 'finished'
+else
+  case $? in
+    3) echo 'the model returned FAIL' ;;
+    4|5) echo 'the run stopped before it finished; see the trace' ;;
+    *) echo 'the run did not complete' ;;
+  esac
+fi
+```
+
+See [Commands](commands.md#exit-status) for the outcome names and the gates
+and causes behind codes 4 and 5.
 
 ## Choose the project
 
@@ -101,6 +146,7 @@ provider's default model.
 
 - `run` can edit files and run commands in the project. Preview and approval
   are not available yet.
-- The exit status does not report task success yet. A run that finishes with an
-  incomplete task can still exit with 0. Read the reply or the JSON summary.
+- Exit 0 means the harness finished cleanly. It does not mean an independent
+  check passed. The summary does not yet list changed paths or the checks
+  that ran.
 - Streamed JSONL output is not available yet.
