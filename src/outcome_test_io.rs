@@ -24,6 +24,10 @@ pub(crate) struct OutcomeIo {
     pub(crate) streams: Mutex<VecDeque<Vec<StreamChunk>>>,
     pub(crate) calls: AtomicUsize,
     pub(crate) discoveries: AtomicUsize,
+    pub(crate) stdin: Option<String>,
+    pub(crate) metadata: Option<ModelContextWindow>,
+    pub(crate) requests: Mutex<Vec<Value>>,
+    pub(crate) metadata_models: Mutex<Vec<String>>,
 }
 
 #[async_trait]
@@ -54,18 +58,31 @@ impl LlmGateway for OutcomeIo {
     }
     async fn get_model_context_window(
         &self,
-        _: &str,
+        model: &str,
     ) -> mojentic::Result<Option<ModelContextWindow>> {
         self.discoveries.fetch_add(1, Ordering::SeqCst);
-        Ok(None)
+        self.metadata_models.lock().unwrap().push(model.to_owned());
+        Ok(self.metadata.clone())
     }
     fn complete_stream<'a>(
         &'a self,
-        _: &'a str,
-        _: &'a [LlmMessage],
-        _: Option<&'a [Box<dyn LlmTool>]>,
-        _: &'a CompletionConfig,
+        model: &'a str,
+        messages: &'a [LlmMessage],
+        tools: Option<&'a [Box<dyn LlmTool>]>,
+        config: &'a CompletionConfig,
     ) -> futures::stream::BoxStream<'a, mojentic::Result<StreamChunk>> {
+        self.requests.lock().unwrap().push(serde_json::json!({
+            "model": model,
+            "messages": messages,
+            "tools": tools.map(|tools| tools.iter().map(|tool| tool.descriptor()).collect::<Vec<_>>()),
+            // Complete debug representation retains every completion control,
+            // including fields without serde implementations. This is a gateway
+            // snapshot, not a reconstruction of either provider's wire request.
+            "completion": format!("{config:?}"),
+            "num_ctx": config.num_ctx,
+            "max_tokens": config.max_tokens,
+            "temperature": config.temperature,
+        }));
         self.calls.fetch_add(1, Ordering::SeqCst);
         let mut streams = self.streams.lock().unwrap();
         let chunks = if streams.len() > 1 {

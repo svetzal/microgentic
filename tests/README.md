@@ -30,8 +30,10 @@ unknown outcomes and error handling.
 
 The gateway is installed with a Tokio task-local scope, including metadata
 discovery. Unexpected advisory, listing and embedding requests fail in the
-double before any transport. Stdin is empty and state lives in the temporary
-workspace. The test I/O scope supplies the tool root after CLI path validation, so tests
+double before any transport. Stdin defaults to empty and can be supplied per
+execution; state lives in the temporary workspace. Metadata answers are normalized
+`ModelContextWindow` values. The driver captures model names, actual messages,
+complete tool descriptors, completion controls and metadata model arguments. The test I/O scope supplies the tool root after CLI path validation, so tests
 never change the process working directory or environment variables.
 Streams are immediately ready. There are no sockets, servers, Python harnesses,
 sleeps, or assertions about elapsed time in this suite.
@@ -76,11 +78,61 @@ opens sockets, starts servers or Python harnesses, sleeps, or measures wall time
 Provider selection coverage is retained for both oMLX and Ollama; these are
 gateway conformance tests, not HTTP wire-format tests. The provider transport
 and cross-repository executable contracts are unchanged by this migration.
-No shared end-to-end support became unused: `provider.rs`, `fixtures.rs`,
-`terminal.rs` and `mod.rs` retain their existing callers and remain intact.
+The shared end-to-end modules `provider.rs`, `fixtures.rs`, `terminal.rs`
+and `mod.rs` retain callers in the remaining suites.
 
-Remaining campaign work: `everyday_runs`, `tui`, `termination`,
-and `benchmark_continuity` still use `tests/support/provider.rs`. Their server
-support and coverage remain in place. Benchmark request-continuity assertions,
-registered Python recovery/progress harnesses and experiment inputs are unchanged.
-This migration does not claim those suites have become in-process tests.
+`src/cli/everyday_runs.rs` replaces all 19 cases from `tests/everyday_runs.rs`.
+The following characterization was made from the original assertions before
+migration. All original test names are retained under `cli::everyday_runs`.
+Each case parses CLI arguments and dispatches through the same entry as the
+public CLI, reaching public `run_agent` (or the conversation worker entry).
+The shared driver supplies stdin and gateways without changing process cwd or
+environment. User guidance lives beside the explicitly selected temporary config;
+its complete absolute identity is asserted, rather than masked or counted alone.
+
+| Former behavior (test name stem) | Replacement evidence |
+| --- | --- |
+| `calculate_answers_batches_and_stays_out_of_benchmark_runs_{omlx,ollama}` | Exact calculation batch values, malformed bracket error with columns, mixed successful/error batch, and tool-result success sequence in the real trace. Captured calculator descriptor includes expression type and required field. Exact final reply; benchmark captured descriptors exclude calculate. |
+| `project_guidance_reaches_everyday_runs_and_conversations_{omlx,ollama}` | Actual system/user messages: ordered user/root guidance, pending nested index, nested content delivered after a real file read and only once, and exact candidate paths/statuses/hash presence. Exact residency activation identities, nested reference path/via/turn, pinned root/tool, current prompt and standing-context accounting. Guidance-disabled request keeps identical full tool descriptors and has no guidance trace. Two CLI worker exchanges use the same on-disk session, retain the first assistant response, and deliver changed root guidance plus the update notice on the second request. Real session history and unchanged notes checked on disk. |
+| `a_plain_question_takes_one_request_{omlx,ollama}` | Both explicit prompt and stdin: literal captured user message, everyday system prompt, available read tool, exact plain stdout (leading blank stream chunks removed), no task continuation. |
+| `a_question_needing_one_tool_takes_two_requests_{omlx,ollama}` | Real read_file result containing the file's pace reaches the next captured request; exact plain reply and no task instructions. |
+| `a_work_request_edits_checks_and_reports_naturally_{omlx,ollama}` | Real edit_file and shell grep; file contains the new greeting, check output reaches the next request, exact plain reply and everyday request policy. |
+| `a_review_keeps_stdin_as_reference_material_{omlx,ollama}` | Exact labelled reference message from stdin, exact plain reply, no adapter probe, and fenced shell command leaves no file behind. |
+| `the_legacy_binary_keeps_the_task_path_for_a_plain_prompt_{omlx,ollama}` | Compatibility entry: actual first task-template message, later continuation message, two allowed iterations and captured tool set without calculate. |
+| `an_everyday_run_discovers_the_context_window_{omlx,ollama}` | Captured metadata calls name test-model; absent metadata yields unknown window and discovery error. Normalized provider window produces exact source/field/tokens, Ollama requested-window cap and advertised capacity, and real ledger accounting. Entire captured requests (messages, descriptors, model and all completion controls) stay equal with/without metadata; explicit assertions retain num_ctx 32768, max_tokens 16384 and temperature 1. Gateway timing metrics reach the real trace with exact first-token kind and numeric timing fields. |
+| `an_ollama_num_ctx_parameter_is_the_discovered_window` | Normalized gateway metadata with model_num_ctx alone or alongside a larger maximum: actual CLI runs account against 16384, retain parameters.num_ctx as source field, and omit advertised_tokens. This verifies Microgentic's precedence after normalization. |
+| `residency_settings_come_from_flags_then_config_then_defaults` | Actual CLI runs with explicit config, individual flag overrides and missing config; exact residency limits/fractions and explicit-setting trace presence agree with the ledger. |
+| `benchmark_runs_record_explicit_residency_settings_only` | Explicit setting recorded only when passed; ledger has neither residency nor residency_settings, and no metadata calls occur. Personal config settings/model, user/project guidance and nonempty stdin are supplied and excluded from captured benchmark requests; calculate stays excluded. |
+
+Run this suite with `cargo test --locked --lib cli::everyday_runs`.
+The initial guidance-reload acceptance probe rejects the old test injection,
+which dropped conversation state, and passes when the `cfg(test)` entry forwards
+that state into the existing gateway execution path. Production behavior is frozen.
+The landed outcome and report suites still share the same driver and fixtures,
+and remain part of the all-targets gate.
+
+Requests here are snapshots at `LlmGateway`, not fabricated HTTP bodies.
+Completion controls include the full `CompletionConfig` debug representation
+(for fields without serde) plus directly asserted scalar controls. Metadata and
+`StreamMetrics` fixtures are normalized gateway inputs: these tests prove
+Microgentic consumes and traces them, not that Mojentic parses HTTP correctly.
+Removed server-only assertions are the exact `/v1/models` GET and `/api/show`
+JSON body, and parsing of Ollama's textual `parameters.num_ctx` alongside
+`model_info` capacity. Those belong to Mojentic's transport coverage; this fake
+provides no evidence about that parsing. SSE/NDJSON parsing and client timing
+measurement are likewise outside the replacement evidence. The exclusively
+unused server num_ctx setter and plumbing were removed; shared window/listing,
+stream, fixture and terminal support retain their callers.
+
+No application/repository boundary, contract version, dependency, feature or
+public API changes. The existing executable outcome contract remains
+`microgentic_terminal_outcome_contract.v1`, SHA-256
+`6c8afe8fe658944da93d4b8f582d74e20a16d8ef59b1dfa3f128592df1183f37`.
+Both the Rust producer suite and Python consumer suite verify it in this
+repository's required gates. No external provider verification is claimed.
+
+Remaining campaign work: `tui`, `termination`, and `benchmark_continuity` still
+use `tests/support/provider.rs`. Their server support and coverage remain in
+place. Benchmark request-continuity assertions, registered Python recovery/progress
+harnesses and experiment inputs are unchanged. This migration does not claim
+those suites have become in-process tests.
