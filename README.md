@@ -37,9 +37,8 @@ their documented XDG locations for future upgrades or reinstalls.
 The harness is built in Rust on top of
 [Mojentic](https://github.com/svetzal/mojentic-ru). It emphasizes deterministic
 validation, strict workspace boundaries, traceable runtime decisions, and
-evidence-backed experimentation. Space Invaders in Bevy is the recurring coding
-benchmark, while additional artifact profiles are used to test whether the
-runtime generalizes beyond one task or domain.
+evidence-backed experimentation. It does not assume one task, language, or
+benchmark suite, and its benchmark commands are meant for any harness.
 
 ## Status
 
@@ -154,7 +153,7 @@ runs; this migration makes no performance claim.
 
 ### Native reasoning prototype
 
-The temporary Git-pinned Mojentic prototype fixes the Generation39 transport
+The temporary Git-pinned Mojentic prototype fixes earlier transport
 limitations. It represents native assistant reasoning separately from content,
 keeps named Ollama effort values distinct, and supports xhigh. The lockfile and
 Cargo.toml identify the exact library commit; return to a published dependency
@@ -184,7 +183,7 @@ and advisory defaults are unchanged by these flags.
 `tests/omlx_gateway.rs` checks production CLI controls and history at mock HTTP
 boundaries. Mojentic also tests both local gateways and broker tool loops.
 These are deterministic compatibility results, not evidence of improved coding
-quality. Generation40 preserves the implementation and validation evidence.
+quality.
 
 ## Build and Test
 
@@ -639,7 +638,7 @@ catalog:
 
 ```sh
 cargo run -- run \
-  --experiment ../Experiments/GenerationN \
+  --experiment ./cell \
   --initial-context-catalog context-catalog.json \
   --semantic-advisor-model Qwen3.8-27B-MLX-8bit
 ```
@@ -874,7 +873,7 @@ The `provider_benchmark` example exercises both Mojentic gateways without the
 adaptive coding policy. It provides a long-prefix reuse probe and a sequential
 receipt-tool session. It saves exact requests, per-call timings and native
 Harness traces. By default, reasoning is disabled and each response is capped
-at 128 tokens, preserving the Generation38 configuration.
+at 128 tokens.
 
 Build with `cargo build --release --locked --example provider_benchmark`, then
 run `target/release/examples/provider_benchmark CONFIG.json` under the workspace
@@ -897,8 +896,7 @@ Use `ollama` with its model ID to select the other gateway. Host/authentication
 settings come from the gateways' environment variables. The output directory
 must not already exist. The receipt tool has no shell or file access.
 
-Generation38 contains the guarded orchestration, raw capture, mock wire tests
-and analysis. Cache counters have provider-specific meanings; gateway action
+Cache counters have provider-specific meanings; gateway action
 latency is not automatically server prefill time. Unload between sessions does
 not clear persistent caches. A semantic failure is recorded in result.json;
 process success alone does not mean the task passed.
@@ -929,7 +927,6 @@ request can therefore report both active=1 and waiting=1; these counts must not
 be added or treated as separate clients. Multiple-request evidence is
 `max(active, waiting) > 1`, while idle requires both zero. This helper does not
 establish request ownership or replace model, memory and admission checks.
-Generation42 preserves installed source evidence and the guarded integration.
 Run its deterministic tests with:
 
 ```sh
