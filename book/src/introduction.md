@@ -39,9 +39,8 @@ contracts, and trace schemas can change between versions. The
 [changelog](changelog.md) records each change.
 
 These features are not built yet: approval previews before edits, durable
-session resume, providers other than oMLX and Ollama, and exit codes that
-report task success. Until then, the runtime can edit files and run commands
-when you ask it to do work.
+session resume, and providers other than oMLX and Ollama. Until then, the
+runtime can edit files and run commands when you ask it to do work.
 
 Microgentic also has a research side. A benchmark mode runs isolated task
 contracts for registered experiments. The everyday commands and benchmark mode
