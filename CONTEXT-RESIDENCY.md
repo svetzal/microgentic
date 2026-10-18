@@ -154,8 +154,8 @@ Ollama before relying on it.
 
 ## Draft hypotheses
 
-IDs are placeholders. Assign real ones when the cells are registered under
-`~/Work/Sandbox2/`.
+IDs are placeholders. Assign real ones when the cells are registered in the
+experiment registry that holds the measurement.
 
 ```text
 HYP-R-1

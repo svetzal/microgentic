@@ -7,9 +7,12 @@ staying on task. Keep the everyday experience small, simple, and fast.
 Treat `CHARTER.md` as the product charter and `PUBLIC_READINESS.md` as the backlog.
 
 The primary development checkout is `~/Work/Projects/Personal/microgentic`.
-`~/Work/Sandbox2/Harness` remains a separate clone for benchmark integration.
-Both use `git@github.com:svetzal/microgentic.git`. Benchmark experiments and their
-operating protocol remain under `~/Work/Sandbox2/`; do not move or rewrite them.
+This repository is self-contained and general. It must not name, depend on, or
+assume any particular benchmark suite, experiment repository, or local path
+outside itself. Experiment repositories depend on Microgentic, never the reverse.
+Keep the benchmark commands usable by any benchmark harness; the current
+adapters (DeepSWE/Pier and Terminal-Bench/Harbor) are the first two consumers,
+not the design target.
 
 ## Runtime and UX boundaries
 
@@ -46,7 +49,7 @@ To compare benchmark requests with an older binary, run
 `MICROGENTIC_CONTINUITY_BASELINE=<old binary> cargo test --test benchmark_continuity -- --ignored --nocapture`.
 The recovery tests call the Python harness in `fixtures/recovery/` and
 `fixtures/progress/`. Stacey decided on 2026-10-15 that this harness stays in
-Python, because Sandbox2 experiments run it and hash-register it. Do not port
+Python, because registered experiments run it and hash-register it. Do not port
 it unless she revisits that decision.
 
 Provider fixtures use mock HTTP servers. Do not start local models for routine
