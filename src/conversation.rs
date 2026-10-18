@@ -266,8 +266,7 @@ impl ConversationRun {
                 };
             }
         }
-        let metadata = crate::model_metadata::for_provider(provider);
-        let window = configured.discover(metadata.as_ref(), model).await;
+        let window = configured.discover(provider, model).await;
         if window.source == WindowSource::Provider {
             self.state
                 .lock()

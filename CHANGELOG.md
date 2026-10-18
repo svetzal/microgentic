@@ -12,6 +12,15 @@ The release workflow publishes each version's section as its GitHub release note
 
 ### Changed
 
+- The provider window query moved into Mojentic. `ContextWindow::discover`
+  asks the provider gateway's `get_model_context_window` (Mojentic 3.0.1 or
+  later, which reports an Ollama model whose only window is its `num_ctx`
+  parameter) and `src/model_metadata.rs` is gone. The trace's
+  `context.window.resolved` record keeps its `tokens` and `field`: the model's
+  `num_ctx` parameter with field `parameters.num_ctx` when the model has one,
+  otherwise the advertised maximum with Mojentic's field path
+  (`max_model_len` on oMLX, `model_info.<arch>.context_length` on Ollama).
+  Only `discovery_error` wording changes, to Mojentic's gateway error text.
 - Microgentic now depends on the published Mojentic 3.0 crate from crates.io
   instead of a pinned Git revision, so dependency maintenance can see when it
   falls behind. Mojentic 3.0 sends a request control only when the caller sets
