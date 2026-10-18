@@ -27,6 +27,19 @@ The release workflow publishes each version's section as its GitHub release note
   stream) still end the run as an error, and their `run.failed` trace
   record's `error` text now opens with the outcome line before the
   original summary.
+- Every run reports what it changed and what was checked. The summary gains
+  `changes` (each file created, modified, or deleted compared with the project
+  at the start of the run, whether by a tool or a shell command, with the
+  paths that already had uncommitted Git edits before the run) and `checks`
+  (declared probes and requested validation commands as passed, failed, not
+  run, or stale; the shell commands the model chose to run, with their exit
+  status, kept apart because they do not accept work; and source files changed
+  after the last passing check). Plain `run` writes the same report to stderr
+  as `microgentic: changed …`, `checks: …`, `commands run: …`, and
+  `unchecked: …` lines, and the conversation view shows them before the
+  `Evidence:` line. A run that changed nothing and ran no checks adds no
+  lines. The trace gains a `run.workspace.baseline` event. Prompts, provider
+  requests, gates, and exit codes are unchanged.
 - Everyday `run` and the conversation ask the provider for the selected
   model's context window: oMLX's `max_model_len` from `/v1/models`, and
   Ollama's `num_ctx` parameter or `<arch>.context_length` from `/api/show`.

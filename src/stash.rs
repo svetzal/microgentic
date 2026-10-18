@@ -14,7 +14,8 @@ pub enum Inventory {
     Unknown,
 }
 
-async fn git(root: &Path, args: &[&str]) -> Option<std::process::Output> {
+/// Run one read-only Git command with a timeout and no optional locks.
+pub(crate) async fn git(root: &Path, args: &[&str]) -> Option<std::process::Output> {
     tokio::time::timeout(
         Duration::from_secs(10),
         Command::new("git")
