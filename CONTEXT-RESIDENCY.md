@@ -232,8 +232,10 @@ and records that.
 
 Step 2 is built for everyday `run` and the conversation. Benchmark mode makes no
 discovery request and records no residency, and its provider requests match
-v0.4.0. The trace fields are in [`TRACE_SCHEMA.md`](TRACE_SCHEMA.md), and the
-live check is in [`RESIDENCY-MEASUREMENT-2026-10.md`](RESIDENCY-MEASUREMENT-2026-10.md).
+v0.4.0. The trace fields are in [`TRACE_SCHEMA.md`](TRACE_SCHEMA.md). The live
+check on 2026-10-15 (four trials, two Qwen models, both providers) confirmed
+discovery on oMLX and Ollama, time to first token on every request, and
+residency records with standing guidance of about 130 tokens.
 
 **Context windows.** The provider fields are oMLX `GET /v1/models`
 `data[].max_model_len`, and Ollama `POST /api/show`, which gives

@@ -2,7 +2,7 @@
 
 Started: 2026-10-13. Reviewed: 2026-10-14. Status: v0.3.0 published through
 Homebrew, with an ongoing streaming conversation and project guidance. Open
-questions answered on 2026-10-15. Remaining proposals are identified below. See [migration evidence](MICROGENTIC-CLI-MIGRATION.md).
+questions answered on 2026-10-15. Remaining proposals are identified below.
 
 Build Microgentic as an adaptive coding agent optimized for small models that
 need extra help staying on task. Give it a small, simple, fast interface with
@@ -147,8 +147,8 @@ initial-context catalog.
 - [x] Specify everyday behavior for greetings, explanations, reviews, and edits
   across `run` and TUI. Keep stdin reference material distinct from instructions.
   Make any prompt or completion-policy change explicit; preserve benchmark mode.
-  Note: everyday `run` now shares the TUI's reply path (README `run` section,
-  [everyday run replies](EVERYDAY-RUN-2026-10.md)). Scripted gateway tests
+  Note: everyday `run` now shares the TUI's reply path (README `run` section
+  and the book's shell page). Scripted gateway tests
   cover greetings, a one-tool answer, an edit with a check, and a review with
   stdin reference material; live Qwen trials covered a greeting, arithmetic
   and an edit, not a review. Benchmark requests match v0.3.0.
@@ -191,8 +191,8 @@ budget defaults.
   vary them. Note: the standing-context limit and the guidance fraction are
   settings now; the skill fractions arrive with skills. The ledger's own
   pressure band stays on the configured window because run policies read it;
-  the known-window band is recorded beside it. See
-  [residency measurement](RESIDENCY-MEASUREMENT-2026-10.md).
+  the known-window band is recorded beside it. The live check on 2026-10-15 ran
+  four trials on two Qwen models across both providers.
 - [ ] Run the guidance on/off baseline cell (HYP-R-4).
 - [ ] Add an ejection policy for guidance, and move tool-result compaction under
   it (HYP-R-1, HYP-R-3).
@@ -352,7 +352,7 @@ the first public alpha usable; P2 extends it after core workflows work.
 ### P0: benchmark compatibility through adapters
 
 The first migration is implemented in the maintained adapters, with an exported
-patch and deterministic checks in [migration evidence](MICROGENTIC-CLI-MIGRATION.md).
+patch and file hashes under `benchmarks/cli-migration/`.
 The source review below describes the pre-migration interface; frozen experiments
 remain unchanged. Container installation and future registered cells need the
 broader gates below.
@@ -372,8 +372,9 @@ identified by source review, not newly executed benchmark results.
   setup, stdin, and TUI history. Keep existing advanced launch forms available.
   Maintained Pier and Harbor adapters now select this mode explicitly. Compare
   provider requests and context ledgers with the pre-UX source before release.
-  See [benchmark mode evidence](MICROGENTIC-BENCHMARK-MODE.md). Container installation
-  and live efficacy measurements remain under the broader gates below.
+  The comparison record is `benchmarks/cli-migration/benchmark-mode-check.json`.
+  Container installation and live efficacy measurements remain under the
+  broader gates below.
 - [ ] **Give rapid attempts distinct trace filenames.** The deterministic
   sequential fixture exposed a pre-existing collision when two attempts start
   within one second. Preserve atomic trace creation while making each filename
@@ -475,7 +476,9 @@ gateway still needs recovery, reasoning, telemetry, and tool-history conformance
   guidance is delivered once per exchange rather than once per conversation.
 - [ ] **Support existing repositories.** Preserve dirty files and baseline
   stashes; show a diff before discard. Make test/build selection reviewable and
-  distinguish inferred checks from user-declared acceptance probes.
+  distinguish inferred checks from user-declared acceptance probes. The stash
+  guard's effect on task outcomes is unmeasured: a replicated cell with the
+  guard as the only runtime change has not been registered.
 
 ### P1: friendly TUI
 
@@ -517,8 +520,8 @@ gateway still needs recovery, reasoning, telemetry, and tool-history conformance
   review, check output, and the final diff remain.
 - [ ] **Keep the conversation across a model or effort switch.** Decided on
   2026-10-15. Today a switch after the first message starts a new session file,
-  because `ConversationRun::open` refuses a different model or effort (see
-  `MICROGENTIC-CONVERSATION.md`). Relax that guard for model and effort only;
+  because `ConversationRun::open` refuses a different model or effort.
+  Relax that guard for model and effort only;
   keep the project root and provider checks. Drop the previous model's retained
   reasoning, trim history to the new model's window, and report what was left out.
 - [ ] **Specify keyboard behavior.** Define send versus newline, history, scroll,

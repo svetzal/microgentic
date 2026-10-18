@@ -1,4 +1,30 @@
-"""Opt-in Pier adapter for local inference without Squid on its data path."""
+"""Opt-in Pier adapter for local inference without Squid on its data path.
+
+The worker stays on ``pier-egress-internal``. A TCP bridge joins that network
+and Pier's default network, listens only on the registered ports, and forwards
+each to the same port on ``host.docker.internal``. It does not parse HTTP,
+accept CONNECT, choose destinations from request content, or publish ports.
+Squid stays available for filtered outbound access and denies the host and the
+bridge. ``OLLAMA_HOST`` and ``OMLX_HOST`` are rewritten to the bridge service;
+only it and loopback bypass HTTP proxies.
+
+To opt in, use ``LocalInferenceDockerEnvironment`` as the environment base with
+``local_inference_ports`` (the exact provider or capture-proxy ports) and
+``local_inference_image`` (a local image ID, ``sha256:`` plus 64 hex digits,
+that provides ``python3``). Give credential-free HTTP endpoints on
+``host.docker.internal`` at those ports; remote hosts, unregistered ports and
+credentials in URLs fail closed. Freeze the adapter, bridge script, image ID,
+ports and topology in the experiment registration. Pier also instantiates this
+class for a verifier with no agent allowlist, which gets neither bridge nor
+proxy.
+
+The bridge drops all capabilities, uses a read-only filesystem, and has a
+ten-second connect timeout and no stream deadline. It preserves bytes and TCP
+half-closes and never retries, replays tools, or unloads models. Run the unit
+checks with Pier's Python environment::
+
+    python -m unittest discover -s benchmarks -p test_local_inference_environment.py -v
+"""
 from __future__ import annotations
 
 import json
