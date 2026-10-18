@@ -1590,3 +1590,11 @@ fn contract_source(goal: Option<PathBuf>, contract: Option<PathBuf>) -> Result<C
 #[cfg(test)]
 #[path = "cli/run_outcomes.rs"]
 mod run_outcomes;
+
+#[cfg(test)]
+#[path = "cli/test_support.rs"]
+mod test_support;
+
+#[cfg(test)]
+#[path = "cli/run_report.rs"]
+mod run_report;
