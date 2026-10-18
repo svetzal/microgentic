@@ -25,7 +25,7 @@ echo 'Explain this project' | microgentic run
 microgentic run --prompt 'Review this diff' < changes.diff > review.txt
 ```
 
-Version `0.1.0` packages support Apple Silicon and Intel Macs on macOS 15 or later,
+Release packages support Apple Silicon and Intel Macs on macOS 15 or later,
 and Linux x86-64 with glibc 2.35 or later. Downloadable binaries and checksums are
 available from [GitHub Releases](https://github.com/svetzal/microgentic/releases).
 The Homebrew package also includes the compatibility executable. `mg` remains
@@ -107,8 +107,7 @@ response timeout. The harness retains authority over stream patience and stops.
 
 The default model is `Qwen3.8-27B-MLX-8bit` for oMLX or
 `qwen3.8:27b-mxfp8` for Ollama. Use `--model` to select another
-installed model ID from `/v1/models`. The local server advertised this default
-model with a 262144-token context window during migration.
+installed model ID from `/v1/models`.
 
 For `run` and `run-sequential`:
 
@@ -132,11 +131,8 @@ For `run` and `run-sequential`:
 - Shell tools use a non-login shell, preserving the inherited PATH and virtual
   environment. Task tools resolve the same executables as the worker environment.
 
-Coding-agent completions use temperature `1.0`, following the user-authorized
-Qwen3.8 sampling change. Acceptance-plan and semantic-advisory settings are
-independent. Existing registered experiments retain their original binaries
-and sampling settings. This change is not evidence of improved quality; future
-replicates must measure repetition, reasoning exits and verified outcomes.
+Coding-agent completions use temperature `1.0`. Acceptance-plan and
+semantic-advisory settings are independent.
 
 Provider snapshots include the requested completion settings and the mapped
 provider controls. Run summaries use `max_tokens` in place of `num_predict`.
@@ -148,16 +144,13 @@ calls. It does not expose token timing metrics or intermediate tool fragments.
 The harness retains its fallback patience projection and local process/GPU
 checks. Model residency remains unknown. Throughput history is filtered by
 selected provider, model, host and context band; runner checks use that provider.
-Performance and reasoning-level effectiveness need separate measured
-runs; this migration makes no performance claim.
+Performance and reasoning-level effectiveness need separate measured runs.
 
-### Native reasoning prototype
+### Native reasoning
 
-The temporary Git-pinned Mojentic prototype fixes earlier transport
-limitations. It represents native assistant reasoning separately from content,
-keeps named Ollama effort values distinct, and supports xhigh. The lockfile and
-Cargo.toml identify the exact library commit; return to a published dependency
-when the coordinated library increment is released.
+The Mojentic gateways represent native assistant reasoning separately from
+content, keep named Ollama effort values distinct, and support xhigh. `Cargo.toml`
+and the lockfile identify the exact Mojentic revision.
 
 Use `--reasoning-profile qwen3.8 --reasoning-effort medium` to validate the model's
 supported controls before HTTP. The profile accepts disabled, low, medium and
@@ -271,6 +264,7 @@ residency record for every item in each request with its reason, size, and
 state. `--standing-context-limit` and `--guidance-fraction`, or the matching
 `config.json` keys, set the limits those records are measured against. See
 [context residency](CONTEXT-RESIDENCY.md).
+
 Empty prompts, duplicate `--prompt` flags, positional prompts, and invalid UTF-8
 fail before a provider call. Stdin is limited to 1 MiB.
 
@@ -284,9 +278,9 @@ questions, and discussion receive natural replies. The conversation supplies
 requests for work; tools are available when those requests or answers need them.
 Quoted commands remain discussion text, and replies do not require DONE/FAIL.
 
-When the TUI opens, a short launch animation plays for about three quarters of
-a second: the name bursts out from the centre, glides into the welcome line,
-and the status bar appears below. It never delays input. Any key, paste, or terminal resize
+When the TUI opens, a short launch animation plays for about 1.7 seconds: the
+name bursts out from the centre, glides into the welcome line, and the status
+bar appears below. It never delays input. Any key, paste, or terminal resize
 skips to the resting screen, and the key still takes effect. The animation does
 not play when `MICROGENTIC_NO_ANIMATION` is set to a non-empty value, when
 `TERM` is `dumb`, or in a terminal smaller than 40 columns by 12 rows. With
@@ -428,7 +422,7 @@ acceptance probes. Task and benchmark `run` contracts keep their existing rules.
 Older complete exchanges are omitted when retained history exceeds half the
 input allowance; the TUI and traces report the omission. Plain and benchmark
 `run` invocations never load this history. Durable resume and detailed tool
-inspection remain preparation work.
+inspection are not available.
 
 Run still uses the existing editing, shell, validation, and stop policies.
 It can mutate the selected project. Preview/apply permissions, JSONL streaming,
@@ -454,15 +448,16 @@ Each run starts with fresh task context; sequential attempts retain their declar
 artifact through the existing retry policy. Provider environment variables still
 supply server URLs and credentials.
 
-Benchmark mode uses the pre-UX task prompting, validation authority, DONE/FAIL
-rules, runtime defaults, and research controls. The default provider remains
-oMLX; adapters select their provider explicitly. `--dir` defaults to the current
-directory, as the original tool root did. Existing advanced `run` forms and the
-compatibility executable remain available. `tests/benchmark_continuity.rs`
-compares its provider requests and context ledgers with a pre-UX build.
+Benchmark mode uses the task prompting, validation authority, DONE/FAIL
+rules, runtime defaults, and research controls that registered experiments
+use. The default provider remains oMLX; adapters select their provider
+explicitly. `--dir` defaults to the current directory, as the original tool
+root did. Existing advanced `run` forms and the compatibility executable remain
+available. `tests/benchmark_continuity.rs`
+compares its provider requests and context ledgers with an older build.
 
-The temporary `adaptive-agent-harness` executable preserves old flags and JSON
-output. Its library import remains `adaptive_agent_harness`. No `mg` executable
+The `adaptive-agent-harness` compatibility executable preserves its old flags
+and JSON output. Its library import remains `adaptive_agent_harness`. No `mg` executable
 or shell alias is installed. Users can opt into `alias mg=microgentic` themselves.
 
 List the available commands:
@@ -631,7 +626,7 @@ killed on cancellation.
 
 ### Native initial-context assembly
 
-Every run now constructs one authoritative initial-context packet before the
+Every run constructs one authoritative initial-context packet before the
 worker starts. By default that packet contains the resolved task and profile
 guidance. `run` and `run-sequential` can also accept an adapter-owned guidance
 catalog:
@@ -695,9 +690,9 @@ provider is invoked.
 Semantic advisories are a reusable proposal-only harness effect with explicit
 kinds for initial-context selection, situation analysis, and failure
 classification. Initial-context selection is the first active consumer. When
-the catalog is omitted—or contains no selectable records—no advisory call is
-made. The semantic-selection policy remains experimental even though native
-context assembly is now foundational.
+the catalog is omitted, or contains no selectable records, no advisory call is
+made. The semantic-selection policy is experimental; native context assembly is
+not.
 
 ### Acceptance coverage ledger
 
@@ -829,7 +824,7 @@ and fidelity rules are documented in [`TRACE_SCHEMA.md`](TRACE_SCHEMA.md).
 
 ## Design and Evidence
 
-The evolving architecture and experimental decisions are documented in
+The history of the architecture and its experimental decisions is in
 [`GENERALIZATION_PLAN.md`](GENERALIZATION_PLAN.md). The repository preserves
 deterministic fixtures and a canonical matrix baseline so architectural changes
 can be checked against earlier behavior.
@@ -847,7 +842,7 @@ Response-side tool-call coverage is measured separately from request coverage.
 `analyze-trace` reports batch count, aggregate and normalized call counts,
 largest batch, bounded-argument truncations, and whether per-call response
 evidence is complete. Stream progress counts remain progress evidence only;
-they never create executable calls in the Harness.
+they never create executable calls.
 
 Every successful read of an unchanged file is rendered as one authoritative,
 event-sourced projection in provider context. Version-three projections put
@@ -872,7 +867,7 @@ Licensed under the MIT License. See [`LICENSE`](LICENSE).
 The `provider_benchmark` example exercises both Mojentic gateways without the
 adaptive coding policy. It provides a long-prefix reuse probe and a sequential
 receipt-tool session. It saves exact requests, per-call timings and native
-Harness traces. By default, reasoning is disabled and each response is capped
+traces. By default, reasoning is disabled and each response is capped
 at 128 tokens.
 
 Build with `cargo build --release --locked --example provider_benchmark`, then
