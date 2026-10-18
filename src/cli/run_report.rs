@@ -1,39 +1,7 @@
-//! What a run reports it changed and checked: `changes` and `checks` in the
-//! JSON summary, and the same report as `microgentic: …` lines on standard
-//! error for plain `microgentic run`. Mock providers, no model.
-mod support;
-
-use serde_json::{Value, json};
-use std::process::Output;
-use support::*;
-
-fn env(provider: &MockProvider, workspace: &Workspace) -> Vec<(&'static str, String)> {
-    let mut env = provider.env();
-    env.push(("XDG_STATE_HOME", workspace.state.display().to_string()));
-    env.push((
-        "XDG_CONFIG_HOME",
-        workspace.base.join("config").display().to_string(),
-    ));
-    env
-}
-
-fn stdout(output: &Output) -> String {
-    String::from_utf8(output.stdout.clone()).expect("stdout is UTF-8")
-}
-
-fn stderr(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stderr).into_owned()
-}
-
-fn summary(output: &Output) -> Value {
-    serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
-        panic!(
-            "the summary is JSON: {error}\n{}\n{}",
-            stdout(output),
-            stderr(output)
-        )
-    })
-}
+//! Run report coverage through real CLI dispatch and tool execution.
+use super::test_support::*;
+use mojentic::llm::gateway::StreamChunk;
+use serde_json::json;
 
 /// The `microgentic: …` lines on standard error.
 fn report(output: &Output) -> Vec<String> {
@@ -45,7 +13,7 @@ fn report(output: &Output) -> Vec<String> {
 }
 
 /// An everyday `microgentic run --prompt` in the project.
-fn everyday(provider: &MockProvider, workspace: &Workspace, extra: &[&str]) -> Output {
+fn everyday(provider: &ScriptedGateway, workspace: &Workspace, extra: &[&str]) -> Output {
     let mut args = vec![
         "run",
         "--provider",
@@ -56,31 +24,25 @@ fn everyday(provider: &MockProvider, workspace: &Workspace, extra: &[&str]) -> O
         "Please do the work.",
     ];
     args.extend_from_slice(extra);
-    run_binary(
-        microgentic(),
-        &args,
-        &workspace.project,
-        &env(provider, workspace),
-        b"",
-    )
+    execute(microgentic(), &args, provider, workspace)
 }
 
-fn edit(path: &str, old: &str, new: &str) -> Step {
+fn edit(path: &str, old: &str, new: &str) -> StreamChunk {
     tool(
         "edit_file",
         json!({"path": path, "edits": [{"kind": "replace_exact", "old": old, "new": new}]}),
     )
 }
 
-fn shell(command: &str) -> Step {
+fn shell(command: &str) -> StreamChunk {
     tool(
         "shell_command",
         json!({"command": command, "timeout_secs": 30}),
     )
 }
 
-fn edit_then_grep(wire: Wire) -> MockProvider {
-    MockProvider::turns(
+fn edit_then_grep(wire: Wire) -> ScriptedGateway {
+    ScriptedGateway::turns(
         wire,
         vec![
             vec![edit("greeting.txt", "Hi there", "Hello there")],
@@ -97,6 +59,7 @@ fn edit_then_check(wire: Wire) {
     workspace.write("greeting.txt", "Hi there\n");
     let output = everyday(&edit_then_grep(wire), &workspace, &["--json"]);
     assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert_eq!(workspace.read("greeting.txt"), "Hello there\n");
     let json = summary(&output);
     assert_eq!(
         json["changes"],
@@ -151,7 +114,7 @@ fn edits_already_in_the_working_tree_are_flagged_and_untouched_ones_are_not_chan
     workspace.git_init();
     workspace.write("a.txt", "one\ntwo\n");
     workspace.write("scratch.txt", "draft\n");
-    let provider = MockProvider::turns(
+    let provider = ScriptedGateway::turns(
         Wire::Omlx,
         vec![
             vec![edit("a.txt", "two", "three")],
@@ -173,7 +136,7 @@ fn edits_already_in_the_working_tree_are_flagged_and_untouched_ones_are_not_chan
     assert_eq!(changes["complete"], true);
 
     workspace.write("a.txt", "one\ntwo\n");
-    let provider = MockProvider::turns(
+    let provider = ScriptedGateway::turns(
         Wire::Omlx,
         vec![
             vec![edit("a.txt", "two", "three")],
@@ -196,7 +159,7 @@ fn files_a_shell_command_creates_and_deletes_are_reported() {
     let workspace = Workspace::new();
     workspace.write("old.txt", "old\n");
     workspace.write("keep.txt", "keep\n");
-    let provider = MockProvider::turns(
+    let provider = ScriptedGateway::turns(
         Wire::Omlx,
         vec![
             vec![shell("printf new > new.txt && rm old.txt")],
@@ -205,6 +168,9 @@ fn files_a_shell_command_creates_and_deletes_are_reported() {
     );
     let output = everyday(&provider, &workspace, &["--json"]);
     assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert_eq!(workspace.read("new.txt"), "new");
+    assert!(!workspace.project.join("old.txt").exists());
+    assert_eq!(workspace.read("keep.txt"), "keep\n");
     let json = summary(&output);
     assert_eq!(
         json["changes"]["files"],
@@ -243,7 +209,7 @@ fn declared_probes_report_which_passed_and_which_did_not_run() {
     )
     .expect("writing the contract");
     let provider = || {
-        MockProvider::turns(
+        ScriptedGateway::turns(
             Wire::Omlx,
             vec![
                 vec![tool("execute_probe", json!({"probe_id": "test"}))],
@@ -272,13 +238,7 @@ fn declared_probes_report_which_passed_and_which_did_not_run() {
     let mut json_args = args.to_vec();
     json_args.push("--json");
     let scripted = provider();
-    let output = run_binary(
-        microgentic(),
-        &json_args,
-        &workspace.project,
-        &env(&scripted, &workspace),
-        b"",
-    );
+    let output = execute(microgentic(), &json_args, &scripted, &workspace);
     assert_eq!(output.status.code(), Some(4), "{}", stderr(&output));
     let json = summary(&output);
     assert_eq!(json["outcome"]["gate"], "probes");
@@ -297,13 +257,7 @@ fn declared_probes_report_which_passed_and_which_did_not_run() {
 
     // Plain output: the report comes before the outcome diagnostic.
     let scripted = provider();
-    let output = run_binary(
-        microgentic(),
-        &args,
-        &workspace.project,
-        &env(&scripted, &workspace),
-        b"",
-    );
+    let output = execute(microgentic(), &args, &scripted, &workspace);
     assert_eq!(output.status.code(), Some(4), "{}", stderr(&output));
     let lines = report(&output);
     assert_eq!(lines.len(), 2, "{lines:?}");
@@ -328,7 +282,7 @@ fn a_source_edit_without_a_passing_check_is_unchecked() {
     let workspace = Workspace::new();
     workspace.write("calc.py", "def add(a, b):\n    return a - b\n");
     let provider = || {
-        MockProvider::turns(
+        ScriptedGateway::turns(
             Wire::Omlx,
             vec![
                 vec![edit("calc.py", "a - b", "a + b")],
@@ -340,6 +294,10 @@ fn a_source_edit_without_a_passing_check_is_unchecked() {
     let output = everyday(&provider(), &workspace, &["--json"]);
     assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
     let json = summary(&output);
+    assert_eq!(
+        workspace.read("calc.py"),
+        "def add(a, b):\n    return a + b\n"
+    );
     assert_eq!(json["checks"]["unchecked_paths"], json!(["calc.py"]));
     assert_eq!(json["checks"]["observed"][0]["exit_code"], 0);
     assert_eq!(
@@ -362,7 +320,7 @@ fn a_source_edit_without_a_passing_check_is_unchecked() {
 fn greeting(wire: Wire) {
     let workspace = Workspace::new();
     workspace.write("notes.txt", "notes\n");
-    let provider = MockProvider::replying(wire, vec![content("Hello there.")]);
+    let provider = ScriptedGateway::replying(wire, vec![content("Hello there.")]);
     let output = everyday(&provider, &workspace, &["--json"]);
     assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
     let json = summary(&output);
@@ -412,6 +370,8 @@ fn a_trace_directory_inside_the_project_is_not_a_change() {
             "{}",
             json["trace_file"]
         );
+        assert!(std::path::Path::new(json["trace_file"].as_str().unwrap()).is_file());
+        assert_eq!(workspace.read("greeting.txt"), "Hello there\n");
         assert_eq!(
             json["changes"]["files"],
             json!([{"path": "greeting.txt", "change": "modified", "edited_before_run": false}]),
@@ -447,7 +407,7 @@ fn an_unrun_file_assertion_probe_is_reported_as_not_run() {
     )
     .expect("writing the contract");
     let provider = || {
-        MockProvider::turns(
+        ScriptedGateway::turns(
             Wire::Omlx,
             vec![
                 vec![tool("execute_probe", json!({"probe_id": "test"}))],
@@ -476,13 +436,7 @@ fn an_unrun_file_assertion_probe_is_reported_as_not_run() {
     let mut json_args = args.to_vec();
     json_args.push("--json");
     let scripted = provider();
-    let output = run_binary(
-        microgentic(),
-        &json_args,
-        &workspace.project,
-        &env(&scripted, &workspace),
-        b"",
-    );
+    let output = execute(microgentic(), &json_args, &scripted, &workspace);
     assert_eq!(output.status.code(), Some(4), "{}", stderr(&output));
     assert_eq!(
         summary(&output)["checks"]["declared"],
@@ -493,13 +447,7 @@ fn an_unrun_file_assertion_probe_is_reported_as_not_run() {
     );
 
     let scripted = provider();
-    let output = run_binary(
-        microgentic(),
-        &args,
-        &workspace.project,
-        &env(&scripted, &workspace),
-        b"",
-    );
+    let output = execute(microgentic(), &args, &scripted, &workspace);
     assert_eq!(
         report(&output).first().map(String::as_str),
         Some("microgentic: checks: probe `test` passed; probe `greeting` not run"),
