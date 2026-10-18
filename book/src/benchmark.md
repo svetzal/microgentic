@@ -31,7 +31,10 @@ microgentic benchmark run-sequential --experiment ./cell \
 - The exit status is 0 whenever a summary was produced and 1 on an error, as
   before. The summary's `outcome` field carries the typed outcome (`done`,
   `failed`, `withheld`, or `hard_stop`), and so does the trace's
-  `run.finished` event. Read it there instead of the exit status. See
+  `run.finished` event. Read it there instead of the exit status. A hard stop
+  raised inside a model stream (an inspection loop or a no-content stream)
+  ends the run with `run.failed` instead, and that record carries the same
+  `outcome` field. A provider or environment error has no `outcome`. See
   [Commands](commands.md#exit-status).
 
 Each run starts with fresh task context. Sequential attempts keep their declared

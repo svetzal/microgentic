@@ -38,6 +38,7 @@ cargo fmt --all --check
 cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo test --locked --all-targets --all-features
 python3 -m unittest discover -s benchmarks -p 'test_collection_validation.py'
+python3 -m unittest discover -s benchmarks -p 'test_terminal_outcome.py'
 cargo build --locked --release --bins
 mdbook build book
 ```

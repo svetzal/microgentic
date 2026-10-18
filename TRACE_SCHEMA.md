@@ -126,6 +126,18 @@ call within that turn. Tool results normally increase depth without advancing
 the turn; a harness follow-up normally advances the turn and resets depth to
 zero.
 
+## Terminal events
+
+Each run ends with one `run.finished` or one `run.failed` event.
+`run.finished` holds the run summary, including its `outcome`, `changes`, and
+`checks`. `run.failed` holds `phase`, `turn`, `error`, `model`,
+`experiment_dir`, `tool_root`, and `goal_file`. It also holds `outcome` when
+the error is a hard stop raised inside a model stream (`hard_stop` with cause
+`inspection_loop` or `no_content_stream`). For a provider or environment
+error, `outcome` is `null`. Readers classify from `outcome` and use `error`
+only as diagnosis. Traces written before outcomes existed have no `outcome`
+field.
+
 ## Context window and residency
 
 Everyday `run` and the conversation record these; benchmark runs do not, so

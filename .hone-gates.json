@@ -26,6 +26,11 @@
       "required": true
     },
     {
+      "name": "outcome-reader-tests",
+      "command": "python3 -m unittest discover -s benchmarks -p 'test_terminal_outcome.py'",
+      "required": true
+    },
+    {
       "name": "docs",
       "command": "mdbook build book",
       "required": true

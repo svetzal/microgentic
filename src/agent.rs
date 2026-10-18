@@ -1937,6 +1937,10 @@ fn trace_run_failed(
             "phase": phase,
             "turn": turn,
             "error": error.to_string(),
+            // The typed outcome when the error carries one (a hard stop
+            // raised inside a model stream), so readers need not parse
+            // `error`; absent for provider and environment errors.
+            "outcome": error.downcast_ref::<RunOutcome>(),
             "model": &config.model,
             "experiment_dir": &config.experiment_dir,
             "tool_root": tool_root,
@@ -9555,6 +9559,38 @@ mod tests {
         assert!(content.contains("agent.stream"));
         assert!(content.contains("unexpected EOF during chunk size line"));
         assert!(content.contains("qwen3.6:27b-coding-mxfp8"));
+        // A provider error carries no typed outcome.
+        let record: serde_json::Value =
+            serde_json::from_str(content.lines().last().unwrap()).unwrap();
+        assert_eq!(record["payload"]["outcome"], serde_json::Value::Null);
+
+        // A hard stop raised inside a stream records its outcome beside the
+        // error text, so a reader classifies it without parsing prose.
+        let stop = hard_stop_error(
+            HardStopCause::InspectionLoop,
+            "repeated list_tree before any action".to_string(),
+        );
+        trace_run_failed(
+            &trace,
+            "agent.stream",
+            Some(2),
+            &stop,
+            &config,
+            &temp.path().join("workspace"),
+            &temp.path().join("experiment/task.md"),
+        )
+        .unwrap();
+        let content = std::fs::read_to_string(trace.path()).unwrap();
+        let record: serde_json::Value =
+            serde_json::from_str(content.lines().last().unwrap()).unwrap();
+        assert_eq!(
+            record["payload"]["outcome"],
+            serde_json::json!({
+                "kind": "hard_stop",
+                "cause": "inspection_loop",
+                "detail": "repeated list_tree before any action",
+            })
+        );
     }
 
     #[tokio::test]
