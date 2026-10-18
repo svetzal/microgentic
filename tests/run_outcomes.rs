@@ -81,16 +81,9 @@ fn task(
     workspace: &Workspace,
     extra: &[&str],
 ) -> Output {
-    // Trace files are named to the second, so runs in one test take
-    // separate trace directories.
-    static RUNS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-    let run = RUNS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    // Every run in a test shares one trace directory, as scripts do.
     let experiment = workspace.base.display().to_string();
-    let traces = workspace
-        .base
-        .join(format!("traces-{run}"))
-        .display()
-        .to_string();
+    let traces = workspace.base.join("traces").display().to_string();
     let mut args: Vec<&str> = verb.to_vec();
     args.extend([
         "--experiment",

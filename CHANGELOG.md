@@ -81,6 +81,14 @@ The release workflow publishes each version's section as its GitHub release note
 
 ### Fixed
 
+- Runs that start within the same second in one trace directory no longer
+  collide. Trace file names were stamped to the second and created
+  exclusively, so the second run failed before any work, which hit rapid
+  `run-sequential` and benchmark attempts and scripted loops of `run`. Names
+  now carry nanoseconds (`run-20261017T093005.123456789Z.jsonl`), and a run
+  that still finds its name taken adds `_01`, `_02`, and so on. Creation stays
+  exclusive, so no trace is ever overwritten, and nothing waits. Names still
+  sort in start order, which transcripts rely on.
 - The conversation view ends when its terminal goes away. crossterm's input
   reader never returns once standard input is at end of file or in error, so
   a conversation whose terminal emulator quit, or whose parent process exited,

@@ -33,6 +33,11 @@ In the conversation, an exchange that uses project tools ends with an
 `Evidence:` line that gives its trace location. All traces are below the
 run-state directory. See [Files and locations](locations.md).
 
+A trace file is named for the moment its run started, to the nanosecond, for
+example `run-20261017T093005.123456789Z.jsonl`. Names sort in start order. If
+two runs start at the same instant in one directory, the later one adds `_01`,
+`_02`, and so on. A run never replaces an existing trace file.
+
 ## Summarize traces
 
 ```sh

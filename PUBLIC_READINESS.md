@@ -85,9 +85,13 @@ prints `final_summary` and returns success even when the summary reports failure
 Trace creation also uses second-resolution filenames with exclusive creation.
 Rapid attempts sharing a trace directory can therefore fail before work starts.
 
-- [ ] Create unique trace filenames without sleeps or overwriting prior evidence.
+- [x] Create unique trace filenames without sleeps or overwriting prior evidence.
   Test rapid and concurrent creation in one directory. Remove sequential-fixture
   pacing.
+  Note: names carry nanoseconds, and a taken name falls back to `_01`, `_02`
+  under the same exclusive create (2026-10-17). Unit tests cover same-instant,
+  back-to-back, and 16-thread creation in one directory; the continuity
+  fixture's pacing and the outcome tests' per-run trace directories are gone.
 - [x] Add a typed terminal outcome at the runtime boundary. Distinguish a completed
   reply, verified task completion, incomplete work, provider/environment failure,
   and cancellation. Use recorded runtime decisions and executor results;
@@ -409,11 +413,13 @@ identified by source review, not newly executed benchmark results.
   The comparison record is `benchmarks/cli-migration/benchmark-mode-check.json`.
   Container installation and live efficacy measurements remain under the
   broader gates below.
-- [ ] **Give rapid attempts distinct trace filenames.** The deterministic
+- [x] **Give rapid attempts distinct trace filenames.** The deterministic
   sequential fixture exposed a pre-existing collision when two attempts start
   within one second. Preserve atomic trace creation while making each filename
   unique. Fix this separately from benchmark mode preservation, then remove
   fixture pacing and check rapid sequential attempts through the public binary.
+  Note: the unpaced sequential continuity case now asserts distinct traces in
+  one directory through the built binary, on both providers.
 - [ ] **Define the adapter boundary before changing commands.** Map benchmark
   task input, project root, provider/model, permissions, probe contract, budgets,
   context policy, output, trace destination, and cancellation to the public
