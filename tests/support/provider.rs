@@ -147,7 +147,6 @@ pub struct MockProvider {
     gets: Arc<Mutex<Vec<String>>>,
     shows: Arc<Mutex<Vec<Value>>>,
     window: Arc<Mutex<Option<usize>>>,
-    num_ctx: Arc<Mutex<Option<usize>>>,
 }
 
 /// Server state shared with each connection.
@@ -157,7 +156,6 @@ struct Served {
     listed: Arc<Mutex<Vec<String>>>,
     shows: Arc<Mutex<Vec<Value>>>,
     window: Arc<Mutex<Option<usize>>>,
-    num_ctx: Arc<Mutex<Option<usize>>>,
     script: Arc<Script>,
     models: Vec<String>,
 }
@@ -182,14 +180,12 @@ impl MockProvider {
         let gets = Arc::new(Mutex::new(Vec::new()));
         let shows = Arc::new(Mutex::new(Vec::new()));
         let window = Arc::new(Mutex::new(None));
-        let num_ctx = Arc::new(Mutex::new(None));
         let served = Arc::new(Served {
             wire,
             recorded: requests.clone(),
             listed: gets.clone(),
             shows: shows.clone(),
             window: window.clone(),
-            num_ctx: num_ctx.clone(),
             script: Arc::new(script),
             models: models.iter().map(|model| (*model).into()).collect(),
         });
@@ -208,7 +204,6 @@ impl MockProvider {
             gets,
             shows,
             window,
-            num_ctx,
         }
     }
 
@@ -247,12 +242,6 @@ impl MockProvider {
         *self.window.lock().expect("window") = tokens;
     }
 
-    /// Give every Ollama model a `num_ctx` line in its `/api/show`
-    /// `parameters`, the size Ollama runs it at when a request sends none.
-    pub fn advertise_num_ctx_parameter(&self, tokens: Option<usize>) {
-        *self.num_ctx.lock().expect("num_ctx") = tokens;
-    }
-
     /// Bodies of Ollama `/api/show` requests, which are not model requests.
     pub fn shows(&self) -> Vec<Value> {
         self.shows.lock().expect("shows").clone()
@@ -280,13 +269,11 @@ fn serve(stream: TcpStream, served: &Served) -> std::io::Result<()> {
         listed,
         shows,
         window,
-        num_ctx,
         script,
         models,
     } = served;
     let wire = *wire;
     let window = *window.lock().expect("window");
-    let num_ctx = *num_ctx.lock().expect("num_ctx");
     let mut reader = BufReader::new(stream.try_clone()?);
     let mut request_line = String::new();
     reader.read_line(&mut request_line)?;
@@ -332,10 +319,7 @@ fn serve(stream: TcpStream, served: &Served) -> std::io::Result<()> {
             Some(tokens) => json!({"general.architecture": "test", "test.context_length": tokens}),
             None => json!({"general.architecture": "test"}),
         };
-        let mut shown = json!({"model_info": info});
-        if let Some(num_ctx) = num_ctx {
-            shown["parameters"] = json!(format!("temperature 1\nnum_ctx {num_ctx}\n"));
-        }
+        let shown = json!({"model_info": info});
         return respond_json(&mut out, 200, &shown);
     }
     let number = {

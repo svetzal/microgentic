@@ -347,7 +347,15 @@ async fn run_agent_entry(
 ) -> Result<AgentRunSummary> {
     #[cfg(test)]
     if let Ok(io) = crate::outcome_test_io::ACTIVE.try_with(Arc::clone) {
-        return run_agent_with_gateway(config, io.as_ref(), io.tool_root.clone()).await;
+        return run_agent_with_gateway_inner(
+            config,
+            io.as_ref(),
+            io.tool_root.clone(),
+            None,
+            conversation,
+            CancellationToken::new(),
+        )
+        .await;
     }
     let tool_root = PathBuf::from(".")
         .canonicalize()

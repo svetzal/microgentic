@@ -11,7 +11,7 @@ use std::sync::{
 #[allow(dead_code)]
 mod fixtures;
 pub(super) use fixtures::*;
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Wire {
     Omlx,
     Ollama,
@@ -28,6 +28,9 @@ pub(super) struct ScriptedGateway {
     wire: Wire,
     turns: Vec<Vec<StreamChunk>>,
     calls: AtomicUsize,
+    requests: Mutex<Vec<Value>>,
+    metadata_models: Mutex<Vec<String>>,
+    metadata: Option<mojentic::llm::gateway::ModelContextWindow>,
 }
 impl ScriptedGateway {
     pub(super) fn turns(wire: Wire, turns: Vec<Vec<StreamChunk>>) -> Self {
@@ -35,10 +38,26 @@ impl ScriptedGateway {
             wire,
             turns,
             calls: AtomicUsize::new(0),
+            requests: Mutex::new(Vec::new()),
+            metadata_models: Mutex::new(Vec::new()),
+            metadata: None,
         }
     }
     pub(super) fn replying(wire: Wire, steps: Vec<StreamChunk>) -> Self {
         Self::turns(wire, vec![steps])
+    }
+    pub(super) fn requests(&self) -> Vec<Value> {
+        self.requests.lock().unwrap().clone()
+    }
+    pub(super) fn metadata_models(&self) -> Vec<String> {
+        self.metadata_models.lock().unwrap().clone()
+    }
+    pub(super) fn with_metadata(
+        mut self,
+        metadata: mojentic::llm::gateway::ModelContextWindow,
+    ) -> Self {
+        self.metadata = Some(metadata);
+        self
     }
     pub(super) fn request_count(&self) -> usize {
         self.calls.load(Ordering::SeqCst)
@@ -70,6 +89,9 @@ pub(super) struct Output {
 }
 pub(super) struct Status(ExitCode);
 impl Status {
+    pub(super) fn success(&self) -> bool {
+        self.0 == ExitCode::SUCCESS
+    }
     pub(super) fn code(&self) -> Option<i32> {
         (0..=255u8)
             .find(|n| self.0 == ExitCode::from(*n))
@@ -82,9 +104,24 @@ pub(super) fn execute(
     provider: &ScriptedGateway,
     workspace: &Workspace,
 ) -> Output {
-    let mut argv = vec![binary, "--config", workspace.config.to_str().unwrap()];
+    execute_input(binary, args, provider, workspace, b"")
+}
+
+pub(super) fn execute_input(
+    binary: &str,
+    args: &[&str],
+    provider: &ScriptedGateway,
+    workspace: &Workspace,
+    stdin: &[u8],
+) -> Output {
+    let mut argv = vec![binary];
+    if !args.contains(&"--config") {
+        argv.extend(["--config", workspace.config.to_str().unwrap()]);
+    }
     argv.extend_from_slice(args);
-    argv.extend(["--dir", workspace.project.to_str().unwrap()]);
+    if !args.contains(&"--dir") {
+        argv.extend(["--dir", workspace.project.to_str().unwrap()]);
+    }
     let cli =
         Cli::from_arg_matches(&command_definition().try_get_matches_from(argv).unwrap()).unwrap();
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -100,8 +137,13 @@ pub(super) fn execute(
         streams: Mutex::new(provider.turns.clone().into()),
         calls: AtomicUsize::new(0),
         discoveries: AtomicUsize::new(0),
+        stdin: (!stdin.is_empty()).then(|| String::from_utf8(stdin.to_vec()).unwrap()),
+        metadata: provider.metadata.clone(),
+        requests: Mutex::new(Vec::new()),
+        metadata_models: Mutex::new(Vec::new()),
     });
-    let everyday = matches!(&cli.command, Some(Command::Run(run)) if run.experiment.is_none() && run.contract.is_none());
+    let everyday = binary != legacy_binary()
+        && matches!(&cli.command, Some(Command::Run(run)) if run.experiment.is_none() && run.contract.is_none());
     let code = runtime
         .block_on(ACTIVE.scope(
             io.clone(),
@@ -118,6 +160,16 @@ pub(super) fn execute(
     provider
         .calls
         .fetch_add(io.calls.load(Ordering::SeqCst), Ordering::SeqCst);
+    provider
+        .requests
+        .lock()
+        .unwrap()
+        .extend(io.requests.lock().unwrap().iter().cloned());
+    provider
+        .metadata_models
+        .lock()
+        .unwrap()
+        .extend(io.metadata_models.lock().unwrap().iter().cloned());
     if let Ok(summary) = serde_json::from_slice::<Value>(&stdout) {
         assert_eq!(summary["provider"], provider.wire.name());
     }

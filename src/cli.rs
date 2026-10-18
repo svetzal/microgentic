@@ -1183,8 +1183,8 @@ const MAX_STDIN_BYTES: u64 = 1024 * 1024;
 
 fn read_stdin() -> Result<Option<String>> {
     #[cfg(test)]
-    if crate::outcome_test_io::ACTIVE.try_with(|_| ()).is_ok() {
-        return Ok(None);
+    if let Ok(input) = crate::outcome_test_io::ACTIVE.try_with(|io| io.stdin.clone()) {
+        return Ok(input);
     }
     if std::io::stdin().is_terminal() {
         return Ok(None);
@@ -1598,3 +1598,6 @@ mod test_support;
 #[cfg(test)]
 #[path = "cli/run_report.rs"]
 mod run_report;
+
+#[cfg(test)]
+mod everyday_runs;

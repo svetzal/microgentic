@@ -1,23 +1,21 @@
-//! Everyday runs against a mock provider, on both providers: natural reply
-//! completion, the calculate tool and project guidance. No terminal and no
-//! model.
-mod support;
-
+//! Everyday CLI behavior through argument parsing, dispatch and the public agent
+//! entry point, with task-scoped doubles at the gateway and intake boundaries.
+use super::test_support::*;
+use mojentic::llm::gateway::{ModelContextWindow, StreamChunk, StreamMetrics};
 use serde_json::{Value, json};
-use std::path::Path;
-use support::*;
 
-/// Run `microgentic` against `provider` and return its parsed JSON summary.
-fn run_json(provider: &MockProvider, cwd: &Path, env: &[(&str, String)], args: &[&str]) -> Value {
-    let mut full_env = provider.env();
-    full_env.extend(env.iter().cloned());
-    let output = run_binary(microgentic(), args, cwd, &full_env, b"");
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    serde_json::from_slice(&output.stdout).expect("the summary is JSON")
+fn run_json(provider: &ScriptedGateway, workspace: &Workspace, args: &[&str]) -> Value {
+    let output = execute(microgentic(), args, provider, workspace);
+    assert!(output.status.success(), "{}", stderr(&output));
+    summary(&output)
+}
+
+fn metadata(tokens: usize, field: &str, num_ctx: Option<usize>) -> ModelContextWindow {
+    ModelContextWindow {
+        max_context_tokens: tokens.try_into().unwrap(),
+        field: field.into(),
+        model_num_ctx: num_ctx,
+    }
 }
 
 fn trace_of(summary: &Value) -> std::path::PathBuf {
@@ -64,16 +62,9 @@ fn calculate_answers_batches_and_stays_out_of_benchmark_runs_ollama() {
 
 fn calculate(wire: Wire) {
     let workspace = Workspace::new();
-    let env = [
-        ("XDG_STATE_HOME", workspace.state.display().to_string()),
-        (
-            "XDG_CONFIG_HOME",
-            workspace.base.join("config").display().to_string(),
-        ),
-    ];
 
     // An everyday run offers calculate; a batch comes back one line each.
-    let provider = MockProvider::turns(
+    let provider = ScriptedGateway::turns(
         wire,
         vec![
             vec![tool(
@@ -92,8 +83,7 @@ fn calculate(wire: Wire) {
     );
     let summary = run_json(
         &provider,
-        &workspace.project,
-        &env,
+        &workspace,
         &[
             "run",
             "--prompt",
@@ -117,6 +107,27 @@ fn calculate(wire: Wire) {
         tool_names(&requests[0]).contains(&"calculate".to_owned()),
         "{:?}",
         tool_names(&requests[0])
+    );
+    let calculator = requests[0]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|tool| tool["function"]["name"] == "calculate")
+        .unwrap();
+    assert_eq!(calculator["type"], "function");
+    assert!(
+        !calculator["function"]["description"]
+            .as_str()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        calculator["function"]["parameters"]["properties"]["expression"]["type"],
+        "string"
+    );
+    assert_eq!(
+        calculator["function"]["parameters"]["required"],
+        json!(["expression"])
     );
     assert_eq!(
         tool_json(&requests[1]),
@@ -168,11 +179,9 @@ fn calculate(wire: Wire) {
         .to_string(),
     )
     .expect("writing the contract");
-    let provider = MockProvider::replying(wire, vec![content("DONE")]);
-    let mut full_env = provider.env();
-    full_env.extend(env.iter().cloned());
+    let provider = ScriptedGateway::replying(wire, vec![content("DONE")]);
     let traces = workspace.base.join("bench-traces");
-    let output = run_binary(
+    let output = execute_input(
         microgentic(),
         &[
             "benchmark",
@@ -192,15 +201,11 @@ fn calculate(wire: Wire) {
             "--max-iterations",
             "1",
         ],
-        &workspace.project,
-        &full_env,
+        &provider,
+        &workspace,
         b"",
     );
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    assert!(output.status.success(), "{}", stderr(&output));
     let requests = provider.requests();
     assert!(!requests.is_empty(), "the benchmark never asked the model");
     assert!(
@@ -229,14 +234,8 @@ fn project_guidance(wire: Wire) {
     workspace.write("AGENTS.md", "ROOT-RULE: run tests with make check.\n");
     workspace.write("sub/AGENTS.md", "SUB-RULE: in sub, answer in French.\n");
     workspace.write("sub/notes.txt", "notes\n");
-    let config_home = workspace.base.join("config");
-    let user_guidance = config_home.join("microgentic").join("AGENTS.md");
-    std::fs::create_dir_all(user_guidance.parent().unwrap()).expect("user config directory");
-    std::fs::write(&user_guidance, "USER-RULE: be brief.\n").expect("user guidance");
-    let env = [
-        ("XDG_STATE_HOME", workspace.state.display().to_string()),
-        ("XDG_CONFIG_HOME", config_home.display().to_string()),
-    ];
+    let user_guidance = workspace.config.with_file_name("AGENTS.md");
+    std::fs::write(&user_guidance, "USER-RULE: be brief.\n").unwrap();
     let run_args = |extra: &[&'static str]| -> Vec<String> {
         let mut args: Vec<String> = [
             "run",
@@ -255,7 +254,7 @@ fn project_guidance(wire: Wire) {
     };
     let read_notes = || tool("read_file", json!({"path": "sub/notes.txt"}));
 
-    let provider = MockProvider::turns(
+    let provider = ScriptedGateway::turns(
         wire,
         vec![
             vec![read_notes()],
@@ -265,7 +264,7 @@ fn project_guidance(wire: Wire) {
     );
     let args = run_args(&[]);
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
-    let summary = run_json(&provider, root, &env, &args);
+    let summary = run_json(&provider, &workspace, &args);
     let requests = provider.requests();
     assert_eq!(requests.len(), 3, "two reads, then the reply ends the run");
     assert_everyday(&requests);
@@ -386,15 +385,17 @@ fn project_guidance(wire: Wire) {
     assert_eq!(last["standing_context"]["items"], 3);
     assert_eq!(last["standing_context"]["enforced"], false);
 
+    assert_eq!(summary["final_summary"], "Done.");
+    assert_eq!(workspace.read("sub/notes.txt"), "notes\n");
     // Guidance never changes the tools; the flag removes it entirely.
-    let plain = MockProvider::replying(wire, vec![content("Done.")]);
+    let plain = ScriptedGateway::replying(wire, vec![content("Done.")]);
     let args = run_args(&["--no-project-guidance"]);
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
-    let summary = run_json(&plain, root, &env, &args);
+    let summary = run_json(&plain, &workspace, &args);
     let plain_requests = plain.requests();
     assert_eq!(plain_requests.len(), 1, "a plain reply ends the run");
     assert!(!plain_requests[0].to_string().contains("Project guidance"));
-    assert_eq!(tool_names(&plain_requests[0]), tool_names(&requests[0]));
+    assert_eq!(plain_requests[0]["tools"], requests[0]["tools"]);
     assert!(!trace_records(&trace_of(&summary)).iter().any(|record| {
         record["kind"]
             .as_str()
@@ -404,11 +405,9 @@ fn project_guidance(wire: Wire) {
     // The conversation worker reads guidance too, and notices changes between exchanges.
     let session = workspace.base.join("session").join("conversation.json");
     std::fs::create_dir_all(session.parent().unwrap()).expect("session directory");
-    let worker = MockProvider::replying(wire, vec![content("Hello.")]);
-    let mut full_env = worker.env();
-    full_env.extend(env.iter().cloned());
+    let worker = ScriptedGateway::replying(wire, vec![content("Hello.")]);
     for prompt in ["Hi.", "Again."] {
-        let output = run_binary(
+        let output = execute_input(
             microgentic(),
             &[
                 "conversation-worker",
@@ -421,15 +420,11 @@ fn project_guidance(wire: Wire) {
                 "--model",
                 "test-model",
             ],
-            root,
-            &full_env,
+            &worker,
+            &workspace,
             b"",
         );
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
+        assert!(output.status.success(), "{}", stderr(&output));
         workspace.write("AGENTS.md", "ROOT-RULE: run tests with make verify.\n");
     }
     let requests = worker.requests();
@@ -442,6 +437,22 @@ fn project_guidance(wire: Wire) {
             .last()
             .unwrap()
             .contains("project guidance was updated")
+    );
+    assert!(
+        requests[1]["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|message| message["role"] == "assistant" && message["content"] == "Hello.")
+    );
+    let saved: Value = serde_json::from_slice(&std::fs::read(&session).unwrap()).unwrap();
+    assert!(
+        saved["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|message| message["role"] == "user"
+                && message["content"].as_str().unwrap().contains("Again."))
     );
     let second = user_messages(&requests[1]);
     assert!(
@@ -457,17 +468,11 @@ fn project_guidance(wire: Wire) {
 
 /// Run an everyday `microgentic run` and require a clean exit.
 fn everyday(
-    provider: &MockProvider,
+    provider: &ScriptedGateway,
     workspace: &Workspace,
     args: &[&str],
     stdin: &[u8],
-) -> std::process::Output {
-    let mut env = provider.env();
-    env.push(("XDG_STATE_HOME", workspace.state.display().to_string()));
-    env.push((
-        "XDG_CONFIG_HOME",
-        workspace.base.join("config").display().to_string(),
-    ));
+) -> Output {
     let mut full = vec![
         "run",
         "--provider",
@@ -476,18 +481,9 @@ fn everyday(
         "test-model",
     ];
     full.extend_from_slice(args);
-    let output = run_binary(microgentic(), &full, &workspace.project, &env, stdin);
-    assert_eq!(
-        output.status.code(),
-        Some(0),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    let output = execute_input(microgentic(), &full, provider, workspace, stdin);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
     output
-}
-
-fn stdout(output: &std::process::Output) -> String {
-    String::from_utf8(output.stdout.clone()).expect("stdout is UTF-8")
 }
 
 /// A plain question takes one request, through `--prompt` or stdin, and
@@ -500,7 +496,7 @@ fn plain_question(wire: Wire) {
         (&[][..], &b"Hello! What is a crate?"[..]),
     ] {
         // Replies often open with blank lines; stdout holds the reply alone.
-        let provider = MockProvider::replying(wire, vec![content("\n\n"), content(reply)]);
+        let provider = ScriptedGateway::replying(wire, vec![content("\n\n"), content(reply)]);
         let output = everyday(&provider, &workspace, args, stdin);
         assert_eq!(stdout(&output), format!("{reply}\n"));
         let requests = provider.requests();
@@ -534,7 +530,7 @@ fn one_tool_question(wire: Wire) {
     let workspace = Workspace::new();
     workspace.write("notes.txt", "PACE = 1.1\n");
     let reply = "The pace is 1.1.";
-    let provider = MockProvider::turns(
+    let provider = ScriptedGateway::turns(
         wire,
         vec![
             vec![tool("read_file", json!({"path": "notes.txt"}))],
@@ -569,7 +565,7 @@ fn edit_and_check(wire: Wire) {
     let workspace = Workspace::new();
     workspace.write("greeting.txt", "Hi there\n");
     let reply = "Changed the greeting to Hello there, and grep found it.";
-    let provider = MockProvider::turns(
+    let provider = ScriptedGateway::turns(
         wire,
         vec![
             vec![tool(
@@ -621,7 +617,7 @@ fn review(wire: Wire) {
     let diff = "--- a/run.sh\n+++ b/run.sh\n@@ -1 +1 @@\n-echo hi\n+echo hello\n";
     let prompt = "Review this diff. Do not run it:\n```sh\ntouch SHOULD_NOT_EXIST\n```";
     let reply = "The diff changes the greeting from hi to hello. It looks fine.";
-    let provider = MockProvider::replying(wire, vec![content(reply)]);
+    let provider = ScriptedGateway::replying(wire, vec![content(reply)]);
     let output = everyday(
         &provider,
         &workspace,
@@ -661,10 +657,8 @@ fn a_review_keeps_stdin_as_reference_material_ollama() {
 /// template, and a continuation prompt after a reply without DONE or FAIL.
 fn legacy_prompt_keeps_the_task_path(wire: Wire) {
     let workspace = Workspace::new();
-    let provider = MockProvider::replying(wire, vec![content("Hello.")]);
-    let mut env = provider.env();
-    env.push(("XDG_STATE_HOME", workspace.state.display().to_string()));
-    let output = run_binary(
+    let provider = ScriptedGateway::replying(wire, vec![content("Hello.")]);
+    let output = execute_input(
         legacy_binary(),
         &[
             "run",
@@ -677,15 +671,11 @@ fn legacy_prompt_keeps_the_task_path(wire: Wire) {
             "--max-iterations",
             "2",
         ],
-        &workspace.project,
-        &env,
+        &provider,
+        &workspace,
         b"",
     );
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    assert!(output.status.success(), "{}", stderr(&output));
     let requests = provider.requests();
     assert_eq!(requests.len(), 2, "one request per allowed iteration");
     assert!(
@@ -717,19 +707,39 @@ fn the_legacy_binary_keeps_the_task_path_for_a_plain_prompt_ollama() {
 // ---------------------------------------------------------------- context window
 
 /// The JSON summary of an everyday run of `prompt`.
-fn everyday_json(provider: &MockProvider, workspace: &Workspace, prompt: &str) -> Value {
+fn everyday_json(provider: &ScriptedGateway, workspace: &Workspace, prompt: &str) -> Value {
     let output = everyday(provider, workspace, &["--prompt", prompt, "--json"], b"");
-    serde_json::from_slice(&output.stdout).expect("the summary is JSON")
+    summary(&output)
 }
 
 /// An everyday run asks the provider for the model's window, traces it with
 /// its source, and accounts against it, without changing the request.
 fn discovered_window(wire: Wire) {
     let workspace = Workspace::new();
-    let unknown = MockProvider::replying(wire, vec![content("Hello.")]);
+    // Timing belongs to the gateway. Supply its normalized metrics and
+    // verify that Microgentic carries them into its actual response trace.
+    let reply = || {
+        vec![
+            content("Hello."),
+            StreamChunk::Metrics(StreamMetrics {
+                provider: wire.name().into(),
+                time_to_first_token_ms: Some(12),
+                first_token_kind: Some("content".into()),
+                request_duration_ms: Some(34),
+                ..Default::default()
+            }),
+        ]
+    };
+    let unknown = ScriptedGateway::replying(wire, reply());
     let before = everyday_json(&unknown, &workspace, "Hello!");
-    let known = MockProvider::replying(wire, vec![content("Hello.")]);
-    known.advertise_window(Some(262_144));
+    let known = ScriptedGateway::replying(wire, reply()).with_metadata(metadata(
+        262_144,
+        match wire {
+            Wire::Omlx => "max_model_len",
+            Wire::Ollama => "model_info.test.context_length",
+        },
+        None,
+    ));
     let after = everyday_json(&known, &workspace, "Hello!");
 
     let resolved = |summary: &Value| {
@@ -774,14 +784,19 @@ fn discovered_window(wire: Wire) {
         ledger["context_window_tokens"].is_null(),
         "the policy window is unchanged"
     );
-    match wire {
-        Wire::Omlx => assert_eq!(known.gets(), ["/v1/models"]),
-        Wire::Ollama => assert_eq!(known.shows(), [json!({"model": "test-model"})]),
-    }
+    assert_eq!(known.metadata_models(), ["test-model"]);
+    assert_eq!(unknown.metadata_models(), ["test-model"]);
+    let request = &known.requests()[0];
+    assert_eq!(request["model"], "test-model");
+    assert_eq!(request["num_ctx"], 32_768);
+    assert_eq!(request["max_tokens"], 16_384);
+    assert_eq!(request["temperature"], 1.0);
+    assert_eq!(user_messages(request), ["Hello!"]);
+    assert!(!request["tools"].as_array().unwrap().is_empty());
     let response = trace_payloads(&trace_of(&after), "llm.context_assembly.response").remove(0);
     assert_eq!(response["first_token_kind"], "content");
-    assert!(response["time_to_first_token_ms"].is_u64(), "{response}");
-    assert!(response["request_duration_ms"].is_u64(), "{response}");
+    assert_eq!(response["time_to_first_token_ms"], 12);
+    assert_eq!(response["request_duration_ms"], 34);
     // The discovered window changes nothing the provider receives, num_ctx
     // included.
     assert_eq!(unknown.requests(), known.requests());
@@ -803,23 +818,23 @@ fn an_everyday_run_discovers_the_context_window_ollama() {
 #[test]
 fn an_ollama_num_ctx_parameter_is_the_discovered_window() {
     let workspace = Workspace::new();
-    let resolved = |provider: &MockProvider| {
+    let resolved = |provider: &ScriptedGateway| {
         let summary = everyday_json(provider, &workspace, "Hello!");
         trace_payloads(&trace_of(&summary), "context.window.resolved")
             .pop()
             .expect("the window is traced")
     };
-    let only_num_ctx = MockProvider::replying(Wire::Ollama, vec![content("Hello.")]);
-    only_num_ctx.advertise_num_ctx_parameter(Some(16_384));
+    let only_num_ctx = ScriptedGateway::replying(Wire::Ollama, vec![content("Hello.")])
+        .with_metadata(metadata(16_384, "parameters.num_ctx", Some(16_384)));
     let window = resolved(&only_num_ctx);
     assert_eq!(window["tokens"], 16_384);
     assert_eq!(window["source"], "provider");
     assert_eq!(window["field"], "parameters.num_ctx");
     assert!(window.get("advertised_tokens").is_none(), "{window}");
 
-    let both = MockProvider::replying(Wire::Ollama, vec![content("Hello.")]);
-    both.advertise_window(Some(262_144));
-    both.advertise_num_ctx_parameter(Some(16_384));
+    let both = ScriptedGateway::replying(Wire::Ollama, vec![content("Hello.")]).with_metadata(
+        metadata(262_144, "model_info.test.context_length", Some(16_384)),
+    );
     let window = resolved(&both);
     assert_eq!(window["tokens"], 16_384);
     assert_eq!(window["field"], "parameters.num_ctx");
@@ -833,7 +848,7 @@ fn an_ollama_num_ctx_parameter_is_the_discovered_window() {
 #[test]
 fn residency_settings_come_from_flags_then_config_then_defaults() {
     let workspace = Workspace::new();
-    let provider = MockProvider::replying(Wire::Omlx, vec![content("Hello.")]);
+    let provider = ScriptedGateway::replying(Wire::Omlx, vec![content("Hello.")]);
     let config = workspace.base.join("settings.json");
     std::fs::write(
         &config,
@@ -848,8 +863,6 @@ fn residency_settings_come_from_flags_then_config_then_defaults() {
         .to_string(),
     )
     .unwrap();
-    let mut env = provider.env();
-    env.push(("XDG_STATE_HOME", workspace.state.display().to_string()));
     let run = |config: &std::path::Path, flags: &[&str]| -> Value {
         let config = config.display().to_string();
         let mut args = vec![
@@ -861,13 +874,9 @@ fn residency_settings_come_from_flags_then_config_then_defaults() {
             "--json",
         ];
         args.extend_from_slice(flags);
-        let output = run_binary(microgentic(), &args, &workspace.project, &env, b"");
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let summary: Value = serde_json::from_slice(&output.stdout).unwrap();
+        let output = execute_input(microgentic(), &args, &provider, &workspace, b"");
+        assert!(output.status.success(), "{}", stderr(&output));
+        let summary: Value = summary(&output);
         let trace = trace_of(&summary);
         let ledger = trace_payloads(&trace, "llm.context_assembly.ledger").remove(0);
         let recorded = trace_payloads(&trace, "context.residency.settings");
@@ -899,6 +908,22 @@ fn residency_settings_come_from_flags_then_config_then_defaults() {
 #[test]
 fn benchmark_runs_record_explicit_residency_settings_only() {
     let workspace = Workspace::new();
+    std::fs::write(
+        &workspace.config,
+        json!({
+            "schema_version": "microgentic_config.v1",
+            "provider": "ollama", "model": "personal-model",
+            "standing_context_limit": 0.7, "guidance_fraction": 0.6,
+        })
+        .to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        workspace.config.with_file_name("AGENTS.md"),
+        "PERSONAL-GUIDANCE",
+    )
+    .unwrap();
+    workspace.write("AGENTS.md", "PROJECT-GUIDANCE");
     let contract = workspace.base.join("contract.json");
     std::fs::write(
         &contract,
@@ -919,7 +944,7 @@ fn benchmark_runs_record_explicit_residency_settings_only() {
             Some(json!({"standing_context_limit": 0.2, "guidance_fraction": 0.125})),
         ),
     ] {
-        let provider = MockProvider::replying(Wire::Omlx, vec![content("DONE")]);
+        let provider = ScriptedGateway::replying(Wire::Omlx, vec![content("DONE")]);
         let traces = tempfile::tempdir().unwrap();
         let experiment = workspace.base.display().to_string();
         let contract = contract.display().to_string();
@@ -944,30 +969,79 @@ fn benchmark_runs_record_explicit_residency_settings_only() {
             "1",
         ];
         args.extend_from_slice(flags);
-        let output = run_binary(
+        let output = execute_input(
             microgentic(),
             &args,
-            &workspace.project,
-            &provider.env(),
-            b"",
+            &provider,
+            &workspace,
+            b"PERSONAL-STDIN",
         );
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let summary: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert!(output.status.success(), "{}", stderr(&output));
+        let summary: Value = summary(&output);
         let trace = trace_of(&summary);
         assert_eq!(
             trace_payloads(&trace, "context.residency.settings").pop(),
             recorded
         );
+        let requests = provider.requests();
+        assert!(!requests.is_empty());
+        for request in &requests {
+            let messages = request["messages"].to_string();
+            for personal in ["PERSONAL-GUIDANCE", "PROJECT-GUIDANCE", "PERSONAL-STDIN"] {
+                assert!(!messages.contains(personal), "{request}");
+            }
+            assert_ne!(request["model"], "personal-model");
+            assert!(!tool_names(request).contains(&"calculate".into()));
+        }
         let ledger = trace_payloads(&trace, "llm.context_assembly.ledger").remove(0);
         assert!(ledger.get("residency_settings").is_none());
         assert!(ledger.get("residency").is_none());
         assert!(
-            provider.gets().is_empty(),
+            provider.metadata_models().is_empty(),
             "benchmark mode asked for the window"
         );
     }
+}
+
+/// The content of the last tool message in a request.
+pub fn last_tool_result(request: &Value) -> String {
+    request["messages"]
+        .as_array()
+        .and_then(|messages| messages.iter().rev().find(|m| m["role"] == "tool"))
+        .and_then(|message| message["content"].as_str())
+        .unwrap_or_default()
+        .to_owned()
+}
+
+/// Every user message's text, in order.
+pub fn user_messages(request: &Value) -> Vec<String> {
+    request["messages"]
+        .as_array()
+        .map(|messages| {
+            messages
+                .iter()
+                .filter(|m| m["role"] == "user")
+                .filter_map(|m| m["content"].as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+pub fn system_message(request: &Value) -> String {
+    request["messages"][0]["content"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned()
+}
+
+pub fn tool_names(request: &Value) -> Vec<String> {
+    request["tools"]
+        .as_array()
+        .map(|tools| {
+            tools
+                .iter()
+                .filter_map(|tool| tool["function"]["name"].as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default()
 }
