@@ -30,6 +30,12 @@ use tokio::time::MissedTickBehavior;
 use tokio_util::sync::CancellationToken;
 
 const APPROX_CHARS_PER_TOKEN: usize = 4;
+/// Request controls Microgentic sends when the caller chooses none. Mojentic
+/// 3.0 omits any unset control, so these keep provider requests identical to
+/// the releases built on Mojentic 2.1, which always sent these values.
+pub(crate) const DEFAULT_TEMPERATURE: f32 = 1.0;
+pub(crate) const DEFAULT_CONTEXT_WINDOW_TOKENS: usize = 32_768;
+pub(crate) const DEFAULT_MAX_TOKENS: usize = 16_384;
 const CONTEXT_INSTRUMENTATION_VERSION: &str = "generation4.context_ledger.v1";
 const DEFAULT_THROUGHPUT_TPS: f64 = 1.0;
 const MODEL_PROGRESS_WARMUP_SECONDS: f64 = 60.0;
@@ -414,21 +420,27 @@ fn agent_completion_config(
     context_window_tokens: Option<usize>,
     reasoning_effort: Option<ReasoningEffort>,
 ) -> Result<CompletionConfig> {
-    let max_tokens = max_tokens.unwrap_or(CompletionConfig::default().max_tokens);
+    let max_tokens = max_tokens.unwrap_or(DEFAULT_MAX_TOKENS);
     if max_tokens == 0 {
         anyhow::bail!("max_tokens must be greater than zero");
     }
-    let mut completion_config = CompletionConfig {
-        temperature: 1.0,
+    Ok(CompletionConfig {
+        temperature: Some(DEFAULT_TEMPERATURE),
+        num_ctx: Some(context_window_tokens.unwrap_or(DEFAULT_CONTEXT_WINDOW_TOKENS)),
+        max_tokens: Some(max_tokens),
         max_tool_iterations: max_model_interactions,
-        max_tokens,
         reasoning_effort,
         ..Default::default()
-    };
-    if let Some(context_window_tokens) = context_window_tokens {
-        completion_config.num_ctx = context_window_tokens;
-    }
-    Ok(completion_config)
+    })
+}
+
+/// The Ollama context size a request carries, which bounds the window
+/// Microgentic accounts against. `agent_completion_config` always sets it;
+/// the fallback covers configurations assembled elsewhere.
+fn requested_num_ctx(completion_config: &CompletionConfig) -> usize {
+    completion_config
+        .num_ctx
+        .unwrap_or(DEFAULT_CONTEXT_WINDOW_TOKENS)
 }
 
 #[cfg(test)]
@@ -529,7 +541,7 @@ async fn run_agent_with_gateway_inner<G: LlmGateway + ?Sized>(
         .context_window
         .clone()
         .map(|window| match config.provider {
-            Provider::Ollama => window.within_num_ctx(completion_config.num_ctx),
+            Provider::Ollama => window.within_num_ctx(requested_num_ctx(&completion_config)),
             Provider::Omlx => window,
         });
     let trace = Arc::new(match &context_window {
@@ -3449,7 +3461,7 @@ async fn stream_response<G: LlmGateway + ?Sized>(
             trace,
             turn,
             depth,
-            context_window_tokens.unwrap_or(completion_config.num_ctx),
+            context_window_tokens.unwrap_or_else(|| requested_num_ctx(&completion_config)),
         )?;
         compact_retained_tool_results(
             &mut current_messages,
@@ -3581,7 +3593,7 @@ struct ContextAssemblyLedger {
     pressure_band: &'static str,
     previous_call_total_chars: Option<usize>,
     delta_chars_from_previous_call: Option<isize>,
-    completion_temperature: f32,
+    completion_temperature: Option<f32>,
     max_model_interactions: usize,
     assembly_policy: &'static str,
     transcript_policy: TranscriptPolicy,
@@ -3849,11 +3861,7 @@ fn trace_provider_request(input: ProviderRequestTraceInput<'_>) -> Result<()> {
                     "context_window_source": "server_model_configuration",
                 }),
                 Provider::Ollama => serde_json::json!({
-                    "num_predict": match completion_config.num_predict {
-                        Some(n) if n > 0 => serde_json::json!(n),
-                        None => serde_json::json!(completion_config.max_tokens),
-                        _ => serde_json::Value::Null,
-                    },
+                    "num_predict": completion_config.max_tokens,
                     "num_ctx": completion_config.num_ctx,
                     "think": match completion_config.reasoning_effort {
                         Some(ReasoningEffort::Disabled) => serde_json::json!(false),
@@ -3872,7 +3880,9 @@ fn trace_provider_request(input: ProviderRequestTraceInput<'_>) -> Result<()> {
                 "temperature": completion_config.temperature,
                 "num_ctx": completion_config.num_ctx,
                 "max_tokens": completion_config.max_tokens,
-                "num_predict": completion_config.num_predict,
+                // Mojentic 3.0 has one output limit, `max_tokens`. The key stays
+                // null so provider_request.v1 packets keep their shape.
+                "num_predict": serde_json::Value::Null,
                 "top_p": completion_config.top_p,
                 "top_k": completion_config.top_k,
                 "response_format": response_format,
@@ -6988,7 +6998,7 @@ mod tests {
             },
         ];
         let config = CompletionConfig {
-            temperature: 0.2,
+            temperature: Some(0.2),
             max_tool_iterations: 50,
             ..Default::default()
         };
@@ -8295,7 +8305,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let trace = TraceRecorder::create(&temp.path().join("traces")).unwrap();
         let config = CompletionConfig {
-            temperature: 0.2,
+            temperature: Some(0.2),
             max_tool_iterations: 1,
             ..Default::default()
         };
@@ -8370,7 +8380,7 @@ mod tests {
             messages: &[LlmMessage::system("system"), LlmMessage::user("task")],
             tools: &tools,
             completion_config: CompletionConfig {
-                temperature: 0.2,
+                temperature: Some(0.2),
                 max_tool_iterations: 10,
                 ..Default::default()
             },
@@ -8423,7 +8433,7 @@ mod tests {
             messages: &[LlmMessage::system("system"), LlmMessage::user("task")],
             tools: &[],
             completion_config: CompletionConfig {
-                temperature: 0.2,
+                temperature: Some(0.2),
                 max_tool_iterations: 1,
                 ..Default::default()
             },
@@ -8471,7 +8481,7 @@ mod tests {
             messages: &[LlmMessage::system("system"), LlmMessage::user("task")],
             tools: &[],
             completion_config: CompletionConfig {
-                temperature: 0.2,
+                temperature: Some(0.2),
                 max_tool_iterations: 1,
                 ..Default::default()
             },
@@ -8527,7 +8537,7 @@ mod tests {
             messages: &[LlmMessage::system("system"), LlmMessage::user("task")],
             tools: &[],
             completion_config: CompletionConfig {
-                temperature: 0.2,
+                temperature: Some(0.2),
                 max_tool_iterations: 1,
                 ..Default::default()
             },
@@ -8586,7 +8596,7 @@ mod tests {
             messages: &[LlmMessage::system("system"), LlmMessage::user("task")],
             tools: &[],
             completion_config: CompletionConfig {
-                temperature: 0.2,
+                temperature: Some(0.2),
                 max_tool_iterations: 1,
                 ..Default::default()
             },
@@ -8636,7 +8646,7 @@ mod tests {
             messages: &[LlmMessage::system("system"), LlmMessage::user("task")],
             tools: &[],
             completion_config: CompletionConfig {
-                temperature: 0.2,
+                temperature: Some(0.2),
                 max_tool_iterations: 1,
                 ..Default::default()
             },
@@ -8704,7 +8714,7 @@ mod tests {
             messages: &[LlmMessage::system("system"), LlmMessage::user("task")],
             tools: &[],
             completion_config: CompletionConfig {
-                temperature: 0.2,
+                temperature: Some(0.2),
                 max_tool_iterations: 1,
                 ..Default::default()
             },
@@ -8764,7 +8774,7 @@ mod tests {
             messages: &[LlmMessage::system("system"), LlmMessage::user("task")],
             tools: &tools,
             completion_config: CompletionConfig {
-                temperature: 0.2,
+                temperature: Some(0.2),
                 max_tool_iterations: MAX_VALIDATION_REPAIR_LLM_CALL_DEPTH + 5,
                 ..Default::default()
             },
@@ -8823,7 +8833,7 @@ mod tests {
             messages: &[LlmMessage::system("system"), LlmMessage::user("task")],
             tools: &tools,
             completion_config: CompletionConfig {
-                temperature: 0.2,
+                temperature: Some(0.2),
                 max_tool_iterations: 5,
                 ..Default::default()
             },
@@ -8885,7 +8895,7 @@ mod tests {
             messages: &[LlmMessage::system("system"), LlmMessage::user("task")],
             tools: &tools,
             completion_config: CompletionConfig {
-                temperature: 0.2,
+                temperature: Some(0.2),
                 max_tool_iterations: 5,
                 ..Default::default()
             },
@@ -8944,15 +8954,12 @@ mod tests {
 
     #[test]
     fn agent_completion_config_defaults_to_bounded_output_and_model_reasoning() {
-        let provider_default = CompletionConfig::default().num_ctx;
-
         let config = agent_completion_config(7, None, None, None).unwrap();
 
-        assert_eq!(config.temperature, 1.0);
-        assert_eq!(config.num_ctx, provider_default);
+        assert_eq!(config.temperature, Some(1.0));
+        assert_eq!(config.num_ctx, Some(32_768));
         assert_eq!(config.max_tool_iterations, 7);
-        assert_eq!(config.max_tokens, 16_384);
-        assert!(config.num_predict.is_none());
+        assert_eq!(config.max_tokens, Some(16_384));
         assert!(config.reasoning_effort.is_none());
         assert!(agent_completion_config(7, Some(0), None, None).is_err());
     }
@@ -8963,9 +8970,8 @@ mod tests {
             agent_completion_config(7, Some(16_384), Some(131_072), Some(ReasoningEffort::Low))
                 .unwrap();
 
-        assert_eq!(config.num_ctx, 131_072);
-        assert_eq!(config.max_tokens, 16_384);
-        assert!(config.num_predict.is_none());
+        assert_eq!(config.num_ctx, Some(131_072));
+        assert_eq!(config.max_tokens, Some(16_384));
         assert_eq!(config.reasoning_effort, Some(ReasoningEffort::Low));
     }
 
@@ -8977,7 +8983,7 @@ mod tests {
         let tools: Vec<Box<dyn LlmTool>> = vec![Box::new(EchoTool)];
         let messages = vec![LlmMessage::system("system"), LlmMessage::user("task")];
         let config = CompletionConfig {
-            temperature: 0.2,
+            temperature: Some(0.2),
             max_tool_iterations: 5,
             ..Default::default()
         };
@@ -9078,7 +9084,7 @@ mod tests {
             messages: &messages,
             tools: &tools,
             completion_config: CompletionConfig {
-                temperature: 0.2,
+                temperature: Some(0.2),
                 max_tool_iterations: 5,
                 ..Default::default()
             },
@@ -9134,7 +9140,7 @@ mod tests {
             messages: &messages,
             tools: &tools,
             completion_config: CompletionConfig {
-                temperature: 0.2,
+                temperature: Some(0.2),
                 max_tool_iterations: 5,
                 ..Default::default()
             },
@@ -11622,6 +11628,7 @@ mod tests {
             eval_count: Some(eval_count),
             eval_duration_ns: Some(1_000_000_000),
             tokens_per_second: Some(eval_count as f64),
+            ..Default::default()
         }
     }
 

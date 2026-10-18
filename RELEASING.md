@@ -15,7 +15,7 @@ Each archive includes `microgentic`, the compatibility executable, the license,
 and `release.json`. The manifest records the source revision and binary checksums.
 `SHA256SUMS` records the archive checksums. Windows and Linux ARM packages remain
 outside the current release matrix. Source builds need Rust 1.99 or later and
-network access for the locked Mojentic Git dependency.
+network access to crates.io for the locked dependencies.
 
 ## Cut a release
 

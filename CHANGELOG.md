@@ -10,6 +10,18 @@ The release workflow publishes each version's section as its GitHub release note
 
 ## [Unreleased]
 
+### Changed
+
+- Microgentic now depends on the published Mojentic 3.0 crate from crates.io
+  instead of a pinned Git revision, so dependency maintenance can see when it
+  falls behind. Mojentic 3.0 sends a request control only when the caller sets
+  it, so Microgentic now sets temperature (1.0), the Ollama context size
+  (32768 when no window is chosen) and the output limit (16384 when none is
+  chosen) explicitly. They are the values every earlier release sent. The
+  benchmark continuity test confirms provider requests, assembled packets and
+  context ledgers equal to 0.5.0 in benchmark and conversation modes on both
+  providers. Source builds no longer need Git access to Mojentic.
+
 ### Added
 
 - The trace's `run.failed` record carries `outcome` when a hard stop raised

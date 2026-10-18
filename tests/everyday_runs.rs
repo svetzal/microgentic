@@ -738,7 +738,7 @@ fn discovered_window(wire: Wire) {
             .expect("the window is traced")
     };
     let window = resolved(&after);
-    // Ollama runs with the num_ctx it is sent (Mojentic's default here), so
+    // Ollama runs with the num_ctx it is sent (Microgentic's default here), so
     // that bounds the advertised window; oMLX uses the advertised window.
     let known_tokens = match wire {
         Wire::Omlx => 262_144,

@@ -2,7 +2,7 @@
 //! These diagnostics deliberately do not claim recovery conformance.
 
 use futures::StreamExt;
-use mojentic::llm::gateway::{CompletionConfig, StreamChunk};
+use mojentic::llm::gateway::{CompletionConfig, StreamChunk, StreamMetrics};
 use mojentic::llm::gateways::{OllamaConfig, OllamaGateway};
 use mojentic::llm::recovery::{RecoveryCall, RecoveryPolicy, RecoveryStreamEvent};
 use mojentic::llm::{LlmGateway, LlmMessage};
@@ -18,6 +18,22 @@ const BODY: &str = concat!(
     "{\"message\":{},\"done\":true,\"done_reason\":\"stop\",\"eval_count\":7,\"prompt_eval_count\":11,",
     "\"total_duration\":2000000000,\"eval_duration\":1000000000}\n",
 );
+
+/// Provider-reported metrics only. Mojentic 3.0 measures wall-clock client
+/// timing on legacy streams, which varies between runs and is absent from raw
+/// recovery telemetry; the worker frame comparison is about provider values.
+fn provider_metrics(metrics: &[StreamMetrics]) -> Vec<StreamMetrics> {
+    metrics
+        .iter()
+        .cloned()
+        .map(|metrics| StreamMetrics {
+            time_to_first_token_ms: None,
+            first_token_kind: None,
+            request_duration_ms: None,
+            ..metrics
+        })
+        .collect()
+}
 
 fn server() -> (OllamaGateway, std::thread::JoinHandle<Vec<Vec<u8>>>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -191,7 +207,10 @@ async fn reviewed_recovery_stream_preserves_worker_frame_progress() {
         ]
     );
     assert_eq!(raw_progress, legacy_progress);
-    assert_eq!(raw_metrics, legacy_metrics);
+    assert_eq!(
+        provider_metrics(&raw_metrics),
+        provider_metrics(&legacy_metrics)
+    );
     drop(stream);
 
     let mut stream = recovery.complete_stream("synthetic", &messages, None, &config);
@@ -205,7 +224,10 @@ async fn reviewed_recovery_stream_preserves_worker_frame_progress() {
         }
     }
     assert_eq!(convenience_progress, legacy_progress);
-    assert_eq!(convenience_metrics, legacy_metrics);
+    assert_eq!(
+        provider_metrics(&convenience_metrics),
+        provider_metrics(&legacy_metrics)
+    );
     let requests = server.join().unwrap();
     assert_eq!(requests.len(), 3);
     assert_eq!(requests[0], requests[1]);

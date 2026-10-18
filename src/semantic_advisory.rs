@@ -129,9 +129,12 @@ pub async fn request_semantic_advisory<G: LlmGateway + ?Sized>(
     )?;
 
     let started = Instant::now();
+    // Advisory requests always carried Mojentic 2.1's default Ollama context
+    // size; keep sending it so provider requests stay identical.
     let completion_config = CompletionConfig {
-        temperature: request.temperature,
-        max_tokens: request.max_output_tokens,
+        temperature: Some(request.temperature),
+        num_ctx: Some(crate::agent::DEFAULT_CONTEXT_WINDOW_TOKENS),
+        max_tokens: Some(request.max_output_tokens),
         max_tool_iterations: 0,
         response_format: Some(ResponseFormat::JsonObject {
             schema: Some(request.response_schema.clone()),

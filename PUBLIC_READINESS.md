@@ -639,9 +639,11 @@ gateway still needs recovery, reasoning, telemetry, and tool-history conformance
   for Apple Silicon, Intel Mac, and Linux x86-64. Embed source revision provenance,
   preserve binary and archive checksums, and check a copied executable while its
   source checkout is unavailable. Publish through `svetzal/tap`; see `RELEASING.md`.
-- [ ] **Complete standalone packaging.** Move from the locked Mojentic Git
-  revision to a compatible released dependency after gateway checks pass.
-  Expand packages to Windows and Linux ARM through native platform gates.
+- [x] **Depend on a released Mojentic.** Microgentic depends on the published
+  Mojentic 3.0 crate; the benchmark continuity test showed provider requests
+  equal to 0.5.0 on both providers.
+- [ ] **Complete standalone packaging.** Expand packages to Windows and Linux
+  ARM through native platform gates.
 - [ ] **Document the lifecycle.** Cover install, first task, provider switch,
   change review, interruption/resume, troubleshooting, and uninstall. Add
   contribution, issue, security-reporting, and compatibility policies.

@@ -1602,7 +1602,7 @@ fn discovered_window_and_residency(wire: Wire) {
         "a known window shows a percentage: {bar}"
     );
     let rows = panel_rows(&screen);
-    // Ollama's num_ctx (Mojentic's default here) bounds the advertised window.
+    // Ollama's num_ctx (Microgentic's default here) bounds the advertised window.
     panel_row(
         &rows,
         match wire {

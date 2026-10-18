@@ -45,8 +45,8 @@ archive for each platform and a `SHA256SUMS` file. Each archive contains a
 
 ## Build from source
 
-You need Rust 1.99 or later, and network access to fetch the locked Mojentic
-Git dependency.
+You need Rust 1.99 or later, and network access to crates.io to fetch the
+locked dependencies.
 
 ```sh
 git clone https://github.com/svetzal/microgentic.git
