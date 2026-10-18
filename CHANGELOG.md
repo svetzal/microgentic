@@ -10,6 +10,15 @@ The release workflow publishes each version's section as its GitHub release note
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-18
+
+Microgentic now builds on the published Mojentic 3.0.1 crate and lets it do
+two jobs the runtime had kept for itself: discovering a model's context window
+and timing the first token. The provider requests, assembled packets and
+context ledgers are unchanged from 0.5.0. Benchmark adapters can classify
+every run ending, including hard stops raised inside a model stream, from
+typed fields in the trace.
+
 ### Changed
 
 - The provider window query moved into Mojentic. `ContextWindow::discover`
@@ -305,7 +314,8 @@ experimental harness into a small terminal interface for everyday use.
 - A successful process exit still needs inspection of the native terminal
   result when classifying benchmark outcomes.
 
-[Unreleased]: https://github.com/svetzal/microgentic/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/svetzal/microgentic/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/svetzal/microgentic/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/svetzal/microgentic/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/svetzal/microgentic/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/svetzal/microgentic/compare/v0.2.0...v0.3.0
