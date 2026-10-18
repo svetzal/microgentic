@@ -436,8 +436,9 @@ fn compare(baseline: &Path, current: &Path, mode: Mode, case: Case, wire: Wire) 
 }
 
 /// Summary fields added since the first public release, each documented as
-/// additive: `outcome` (added after 0.4.0) says how the run ended.
-const ADDITIVE_SUMMARY_KEYS: &[&str] = &["outcome"];
+/// additive: `outcome` (added after 0.4.0) says how the run ended; `changes`
+/// and `checks` (added after 0.4.0) say what the run changed and checked.
+const ADDITIVE_SUMMARY_KEYS: &[&str] = &["outcome", "changes", "checks"];
 
 fn current_binary() -> PathBuf {
     PathBuf::from(microgentic())

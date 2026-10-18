@@ -13,6 +13,9 @@ did.
 - streamed reasoning and reply text
 - each tool call and its result
 - validation results, stop decisions, and the final outcome
+- the project files and their uncommitted Git edits when the run started
+  (`run.workspace.baseline`), and in `run.finished`, the files that the run
+  changed and the checks that passed, failed, or did not run
 - the project guidance that was discovered and delivered
 - the model's context window and where it came from: your
   `--context-window-tokens`, the provider, or Microgentic's model table

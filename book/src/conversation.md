@@ -212,6 +212,20 @@ It gives the location of the trace for that exchange. Ordinary replies have no
 evidence line, but every exchange still saves a trace. See
 [Traces and transcripts](traces.md).
 
+Before the `Evidence:` line, the exchange says what it changed and what was
+checked, when there is something to say:
+
+```text
+Changed 1 file: greeting.txt (modified)
+Commands run: `grep -c 'Hello there' greeting.txt` exit 0
+Evidence: ~/.local/state/microgentic/runs/…/trace.jsonl
+```
+
+The lines are the same as the ones that `run` writes to stderr: `Changed`,
+`Checks`, `Commands run`, and `Unchecked`. Each exchange is compared with the
+project as it was when that exchange started. See
+[What changed and what was checked](shell.md#what-changed-and-what-was-checked).
+
 ## Colour and animation
 
 The view uses your terminal's named colours, so it follows a light or dark

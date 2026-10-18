@@ -6,7 +6,7 @@ use crate::acceptance_plan::{DEFAULT_MAX_PLAN_ITEMS, plan_acceptance_with_gatewa
 use crate::outcome::{HardStopCause, RunOutcome, WithheldGate};
 use crate::sha256::sha256_hex;
 use crate::tools::{
-    SuccessfulValidationSnapshot, ToolPolicySnapshot, ToolScope, ToolSurface,
+    FileFingerprint, SuccessfulValidationSnapshot, ToolPolicySnapshot, ToolScope, ToolSurface,
     ValidationRepairSnapshot, tools_for_profile,
 };
 use crate::trace::TraceRecorder;
@@ -190,6 +190,11 @@ pub struct AgentRunSummary {
     pub final_summary: String,
     /// How the run ended, as the runtime established it.
     pub outcome: RunOutcome,
+    /// What the run changed in the project, relative to its start.
+    pub changes: crate::run_report::WorkspaceChanges,
+    /// Which declared checks passed, failed or did not run, and which
+    /// commands the model ran.
+    pub checks: crate::run_report::RunChecks,
     pub harness_source_state: crate::provenance::HarnessSourceState,
 }
 
@@ -562,6 +567,35 @@ async fn run_agent_with_gateway_inner<G: LlmGateway + ?Sized>(
         evidence.bind(trace.clone());
     }
     let stash_baseline = crate::stash::capture(&tool_root).await;
+    // The workspace as the run found it, to report what the run changed.
+    // Files the harness itself writes during the run are left out. A trace
+    // directory that holds the whole project (`--trace-dir .`) cannot be
+    // skipped as a whole, so its trace file and planning output are.
+    let mut harness_files = if tool_root.starts_with(harness_path(&trace_dir)) {
+        vec![
+            harness_path(trace.path()),
+            harness_path(&trace_dir.join("acceptance-plan")),
+            harness_path(&trace_dir.join("acceptance-interactions")),
+        ]
+    } else {
+        vec![harness_path(&trace_dir)]
+    };
+    harness_files.push(harness_path(&experiment_dir.join("model-throughput.jsonl")));
+    let scope_rules = |scope: &crate::contract::Scope| match scope {
+        crate::contract::Scope::Unrestricted => Vec::new(),
+        crate::contract::Scope::Rules(rules) => rules.clone(),
+    };
+    let edited_before_run = crate::run_report::edited_before_run(&tool_root).await;
+    let workspace_baseline = match ToolScope::new_profiled(
+        tool_root.clone(),
+        Arc::clone(&trace),
+        resolved_contract.profile.clone(),
+        scope_rules(&resolved_contract.read_scope),
+        scope_rules(&resolved_contract.write_scope),
+    ) {
+        Ok(snapshot_scope) => workspace_snapshot(snapshot_scope, harness_files.clone()).await,
+        Err(error) => Err(format!("{error:#}")),
+    };
     let harness_source_state = crate::provenance::capture();
     let tool_surface = ToolSurface::from_environment()?;
     trace.event(
@@ -610,6 +644,15 @@ async fn run_agent_with_gateway_inner<G: LlmGateway + ?Sized>(
         trace.event("context.residency.settings", residency_settings)?;
     }
     trace.event("agent.git_stash.entry", &stash_baseline)?;
+    trace.event(
+        "run.workspace.baseline",
+        serde_json::json!({
+            "file_count": workspace_baseline.as_ref().map_or(0, BTreeMap::len),
+            "complete": workspace_baseline.is_ok(),
+            "note": workspace_baseline.as_ref().err(),
+            "edited_before_run": &edited_before_run,
+        }),
+    )?;
     trace.event(
         "packet.scope",
         serde_json::json!({
@@ -745,10 +788,6 @@ async fn run_agent_with_gateway_inner<G: LlmGateway + ?Sized>(
         }
     };
 
-    let scope_rules = |scope: &crate::contract::Scope| match scope {
-        crate::contract::Scope::Unrestricted => Vec::new(),
-        crate::contract::Scope::Rules(rules) => rules.clone(),
-    };
     let scope = ToolScope::new_profiled(
         tool_root.clone(),
         Arc::clone(&trace),
@@ -1714,6 +1753,32 @@ async fn run_agent_with_gateway_inner<G: LlmGateway + ?Sized>(
         }),
     )?;
     scope.observe_runtime(crate::runtime::RuntimeEvent::RunFinished);
+    if let Some((_, plan, interactions)) = &acceptance_ledger {
+        harness_files.extend([harness_path(plan), harness_path(interactions)]);
+    }
+    let workspace_final = match &workspace_baseline {
+        Ok(_) => workspace_snapshot(scope.clone(), harness_files).await,
+        // A second walk would only repeat why the first one failed.
+        Err(note) => Err(note.clone()),
+    };
+    let changes = crate::run_report::workspace_changes(
+        &workspace_baseline,
+        &workspace_final,
+        edited_before_run,
+    );
+    let checks = crate::run_report::RunChecks {
+        declared: declared_checks(
+            &resolved_contract.probes,
+            &scope.runtime_state_snapshot(),
+            &requested_validation_ledger,
+        ),
+        observed: scope.observed_commands(),
+        unchecked_paths: scope
+            .runtime_state_snapshot()
+            .pending_evidence_paths
+            .into_keys()
+            .collect(),
+    };
 
     let summary = AgentRunSummary {
         provider: config.provider,
@@ -1753,11 +1818,95 @@ async fn run_agent_with_gateway_inner<G: LlmGateway + ?Sized>(
         excluded_initial_context_ids: initial_context.excluded_ids,
         final_summary,
         outcome,
+        changes,
+        checks,
         harness_source_state,
     };
     trace.event("run.finished", &summary)?;
     trace.conversation_checkpoint(&messages);
     Ok(summary)
+}
+
+/// Every declared check, for the run report: each declared probe in contract
+/// order, then each requested validation command the task text asked for.
+///
+/// The runtime state is the authority for declared probes, because the probe
+/// gate reads it: where the ledger and the runtime state disagree about a
+/// probe id, the runtime state wins and the ledger entry is not listed. A
+/// probe that passed before a later source change is stale, as the gate sees
+/// it.
+fn declared_checks(
+    probes: &[crate::contract::Probe],
+    state: &crate::runtime::RuntimeState,
+    ledger: &RequestedValidationLedger,
+) -> Vec<crate::run_report::DeclaredCheck> {
+    use crate::run_report::{CheckStatus, DeclaredCheck};
+    use crate::runtime::ProbeStatus;
+    let declared = state.requested_probes.iter().map(|probe| {
+        let command = probes
+            .iter()
+            .find(|declared| declared.id == probe.id)
+            .map(|declared| match &declared.assertion {
+                Some(crate::contract::FileAssertion::FileTextEquals { path, .. }) => {
+                    format!("file_text_equals {path}")
+                }
+                None => declared.command.clone(),
+            })
+            .unwrap_or_default();
+        let status = match probe.status {
+            ProbeStatus::Pending => CheckStatus::NotRun,
+            ProbeStatus::Passed if probe.mutation_epoch != Some(state.mutation_epoch) => {
+                CheckStatus::Stale
+            }
+            ProbeStatus::Passed => CheckStatus::Passed,
+            ProbeStatus::Failed => CheckStatus::Failed,
+            ProbeStatus::Stale => CheckStatus::Stale,
+        };
+        DeclaredCheck {
+            probe_id: Some(probe.id.clone()),
+            command,
+            status,
+            exit_code: probe.status_code,
+        }
+    });
+    let requested = ledger
+        .entries
+        .iter()
+        .filter(|entry| entry.probe_id.is_none())
+        .map(|entry| DeclaredCheck {
+            probe_id: None,
+            command: entry.command.clone(),
+            status: match entry.status {
+                RequestedValidationStatus::Pending => CheckStatus::NotRun,
+                RequestedValidationStatus::Passed => CheckStatus::Passed,
+                RequestedValidationStatus::Failed => CheckStatus::Failed,
+                RequestedValidationStatus::Stale => CheckStatus::Stale,
+            },
+            exit_code: entry.status_code,
+        });
+    declared.chain(requested).collect()
+}
+
+/// A path the harness writes, canonical where it exists (or where its
+/// directory does), so a project snapshot can skip it.
+fn harness_path(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| {
+        match (path.parent().map(Path::canonicalize), path.file_name()) {
+            (Some(Ok(parent)), Some(name)) => parent.join(name),
+            _ => path.to_path_buf(),
+        }
+    })
+}
+
+/// Walk the project off the async runtime; an error becomes its reason.
+async fn workspace_snapshot(
+    scope: ToolScope,
+    excluded: Vec<PathBuf>,
+) -> crate::run_report::Snapshot<FileFingerprint> {
+    tokio::task::spawn_blocking(move || scope.workspace_snapshot(&excluded))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| format!("{error:#}"))
 }
 
 fn hard_stop(cause: HardStopCause, detail: &str) -> RunOutcome {
@@ -6347,6 +6496,72 @@ fn repair_detail_text(repair: &ValidationRepairSnapshot) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn declared_checks_follow_the_runtime_state_and_a_passed_probe_from_an_older_epoch_is_stale() {
+        use crate::run_report::CheckStatus;
+        use crate::runtime::{ProbeStatus, RequestedProbeState, RuntimeState};
+        let probes = vec![
+            crate::contract::Probe::command("test", "cargo test"),
+            crate::contract::Probe::file_text_equals("greeting", "greeting.txt", "Hello\n"),
+            crate::contract::Probe::command("lint", "cargo clippy"),
+        ];
+        let mut state = RuntimeState::new(vec!["test".into(), "greeting".into(), "lint".into()]);
+        state.mutation_epoch = 2;
+        let probe = |id: &str, status, code, epoch| RequestedProbeState {
+            id: id.into(),
+            status,
+            observed_command: None,
+            status_code: code,
+            mutation_epoch: epoch,
+        };
+        state.requested_probes = vec![
+            probe("test", ProbeStatus::Passed, Some(0), Some(1)),
+            probe("greeting", ProbeStatus::Pending, None, None),
+            probe("lint", ProbeStatus::Passed, Some(0), Some(2)),
+        ];
+        // The ledger still says `test` passed and adds a requested command;
+        // the runtime state wins for probes.
+        let mut ledger = RequestedValidationLedger::new_for_probes(
+            &probes,
+            crate::profile::ProfileRef::default(),
+        );
+        ledger.entries[0].status = RequestedValidationStatus::Passed;
+        ledger.entries.push(RequestedValidationEntry {
+            probe_id: None,
+            command: "make check".into(),
+            status: RequestedValidationStatus::Failed,
+            observed_command: None,
+            status_code: Some(2),
+            generation: None,
+        });
+        let checks = declared_checks(&probes, &state, &ledger);
+        let summary: Vec<_> = checks
+            .iter()
+            .map(|check| {
+                (
+                    check.probe_id.as_deref(),
+                    check.command.as_str(),
+                    check.status,
+                    check.exit_code,
+                )
+            })
+            .collect();
+        assert_eq!(
+            summary,
+            [
+                (Some("test"), "cargo test", CheckStatus::Stale, Some(0)),
+                (
+                    Some("greeting"),
+                    "file_text_equals greeting.txt",
+                    CheckStatus::NotRun,
+                    None
+                ),
+                (Some("lint"), "cargo clippy", CheckStatus::Passed, Some(0)),
+                (None, "make check", CheckStatus::Failed, Some(2)),
+            ]
+        );
+    }
     use crate::tools::coding_tools;
     use async_trait::async_trait;
     use futures::stream;

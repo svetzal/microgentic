@@ -885,6 +885,10 @@ fn apply_event(view: &mut View, run: &mut ActiveRun, event: ConversationEvent) {
             // Trace visibility follows this exchange's actual work, never its
             // wording or tool history retained from an earlier prompt.
             if run.used_project_tools {
+                for line in run_report_lines(&summary) {
+                    view.history.start_line();
+                    view.history.push(Role::Evidence, &format!("{line}\n"));
+                }
                 view.history.start_line();
                 let trace = summary["trace_file"].as_str().unwrap_or("unknown");
                 let home = std::env::var_os("HOME");
@@ -912,6 +916,28 @@ fn apply_event(view: &mut View, run: &mut ActiveRun, event: ConversationEvent) {
             run.terminal_reported = true;
         }
     }
+}
+
+/// What the exchange changed and checked, as the command line reports it,
+/// each line starting with a capital. A summary without the report renders
+/// nothing.
+fn run_report_lines(summary: &serde_json::Value) -> Vec<String> {
+    let (Ok(changes), Ok(checks)) = (
+        serde_json::from_value::<crate::run_report::WorkspaceChanges>(summary["changes"].clone()),
+        serde_json::from_value::<crate::run_report::RunChecks>(summary["checks"].clone()),
+    ) else {
+        return Vec::new();
+    };
+    crate::run_report::report_lines(&changes, &checks)
+        .into_iter()
+        .map(|line| {
+            let mut chars = line.chars();
+            chars
+                .next()
+                .map(|first| first.to_uppercase().chain(chars).collect())
+                .unwrap_or_default()
+        })
+        .collect()
 }
 
 /// The run outcome in a finished worker's summary, when the run did not
@@ -1138,6 +1164,78 @@ mod tests {
                 ["● Ready for your next message. Esc to quit."]
             );
         }
+    }
+
+    /// After project-tool work the exchange says what changed and what was
+    /// checked, between the outcome and the evidence line; a reply with no
+    /// project tools shows none of it.
+    #[tokio::test]
+    async fn the_run_report_follows_project_tool_work_before_the_evidence_line() {
+        let report = serde_json::json!({
+            "final_summary": "Fixed it.",
+            "trace_file": "t.jsonl",
+            "outcome": {"kind": "replied"},
+            "changes": {
+                "complete": true,
+                "note": null,
+                "files": [
+                    {"path": "src/parser.rs", "change": "modified", "edited_before_run": true},
+                    {"path": "notes/new.md", "change": "created", "edited_before_run": false},
+                ],
+                "edited_before_run": ["src/parser.rs"],
+            },
+            "checks": {
+                "declared": [],
+                "observed": [{"command": "cargo test", "exit_code": 101}],
+                "unchecked_paths": ["src/parser.rs"],
+            },
+        });
+        let mut worked = view();
+        let mut worked_run = placeholder_run();
+        for event in [
+            ConversationEvent::ReplyStarted,
+            tool(
+                "a",
+                "edit_file",
+                serde_json::json!({"path": "src/parser.rs"}),
+            ),
+            ConversationEvent::ToolFinished {
+                call_id: "a".into(),
+                name: "edit_file".into(),
+                ok: true,
+                preview: String::new(),
+            },
+            ConversationEvent::ReplyStarted,
+            ConversationEvent::Content {
+                text: "Fixed it.".into(),
+            },
+            ConversationEvent::Finished {
+                summary: report.clone(),
+            },
+        ] {
+            apply_event(&mut worked, &mut worked_run, event);
+        }
+        let text = history_text(&worked);
+        assert!(
+            text.ends_with(
+                "Fixed it.\nChanged 2 files: src/parser.rs (modified, edited before the run), notes/new.md (created)\nCommands run: `cargo test` exit 101\nUnchecked: src/parser.rs changed after the last passing check\nEvidence: t.jsonl\n"
+            ),
+            "{text}"
+        );
+
+        let mut chat = view();
+        let mut chat_run = placeholder_run();
+        for event in [
+            ConversationEvent::ReplyStarted,
+            ConversationEvent::Content {
+                text: "Fixed it.".into(),
+            },
+            ConversationEvent::Finished { summary: report },
+        ] {
+            apply_event(&mut chat, &mut chat_run, event);
+        }
+        let text = history_text(&chat);
+        assert!(text.ends_with("Microgentic: Fixed it."), "{text}");
     }
 
     fn tool(id: &str, name: &str, arguments: serde_json::Value) -> ConversationEvent {

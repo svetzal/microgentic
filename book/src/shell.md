@@ -76,6 +76,64 @@ Its `outcome` field says how the run ended: `{"kind": "replied"}`,
 `{"kind": "hard_stop", "cause": "…", "detail": "…"}`. The other fields are
 unchanged.
 
+## What changed and what was checked
+
+At the end of a run, stderr says what the run changed in the project and which
+checks ran. Each line starts with `microgentic:`:
+
+```text
+microgentic: changed 2 files: src/parser.rs (modified, edited before the run), notes/new.md (created)
+microgentic: checks: probe `test` passed; probe `lint` not run
+microgentic: commands run: `cargo test` exit 0
+microgentic: unchecked: src/lib.rs changed after the last passing check
+```
+
+- **changed** lists the files that are created, modified, or deleted when the
+  run ends, compared with the project when the run started. Edits by tools and
+  by shell commands both count. A file that already had uncommitted Git edits
+  before the run says `edited before the run`, so you can tell the run's work
+  from your own. Files that Git or the project ignores are not compared.
+- **checks** are the probes that a task contract declares, and the validation
+  commands that the task asked for. Each one is `passed`, `failed`, `not run`,
+  or `stale (passed before later edits)`. Only these checks can accept a task.
+- **commands run** are the shell commands that the model chose to run, with
+  their exit status. They are what the model observed. They do not accept or
+  reject the work.
+- **unchecked** lists source files that changed after the last passing check.
+
+A run that changed nothing and ran no checks writes none of these lines, so a
+plain question gets only its reply. When the run did not succeed, the outcome
+line comes after them.
+
+With `--json`, the same report is in the summary's `changes` and `checks`
+fields:
+
+```json
+"changes": {
+  "complete": true,
+  "note": null,
+  "files": [
+    {"path": "src/parser.rs", "change": "modified", "edited_before_run": true}
+  ],
+  "edited_before_run": ["src/parser.rs", "README.md"]
+},
+"checks": {
+  "declared": [
+    {"probe_id": "test", "command": "cargo test", "status": "passed", "exit_code": 0}
+  ],
+  "observed": [{"command": "cargo test", "exit_code": 0}],
+  "unchecked_paths": []
+}
+```
+
+`edited_before_run` is `null` when the project is not a Git repository. When
+Microgentic cannot compare the whole project, for example in a project with
+more than 50,000 files, `complete` is `false` and `note` says why. stderr then
+says `changes not fully known` with the reason, on every run, so that an empty
+list is never read as "nothing changed". A declared check's `status` is
+`passed`, `failed`, `not_run`, or `stale`. A file-content probe shows its
+`command` as `file_text_equals` and the file path.
+
 ## Exit status
 
 The exit status says how the run ended, so a script can branch on it without
@@ -147,6 +205,8 @@ provider's default model.
 - `run` can edit files and run commands in the project. Preview and approval
   are not available yet.
 - Exit 0 means the harness finished cleanly. It does not mean an independent
-  check passed. The summary does not yet list changed paths or the checks
-  that ran.
+  check passed. Read the `checks` report to see what was checked.
+- The changes report compares file contents, not Git commits. It does not
+  report changes outside the project directory, such as files that a shell
+  command writes elsewhere.
 - Streamed JSONL output is not available yet.

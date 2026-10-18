@@ -961,6 +961,18 @@ async fn dispatch(legacy: bool) -> Result<ExitCode> {
                 plain_reply(&summary.final_summary).to_owned()
             };
             writeln!(std::io::stdout().lock(), "{output}")?;
+            // Plain output says on standard error what the run changed and
+            // checked; JSON carries the same report in the summary.
+            if !json {
+                let lines = crate::run_report::report_lines(&summary.changes, &summary.checks);
+                if !lines.is_empty() {
+                    crate::trace::end_open_stderr_line();
+                    let mut stderr = std::io::stderr().lock();
+                    for line in lines {
+                        writeln!(stderr, "microgentic: {line}")?;
+                    }
+                }
+            }
             // The compatibility executable keeps its historical status; the
             // public one says on standard error how a run ended when it did
             // not finish its work, and exits accordingly.

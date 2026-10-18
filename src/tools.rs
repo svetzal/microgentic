@@ -3,6 +3,7 @@ use crate::acceptance_ledger::{
 };
 use crate::contract::{FileAssertion, Probe};
 use crate::profile::{DomainProfile, ProfileRef, ToolCapability};
+use crate::run_report::{MAX_SNAPSHOT_FILES, ObservedCommand};
 use crate::runtime::{
     MutationSource, RuntimeDecision, RuntimeEvent, RuntimePolicy, RuntimeState,
     SuccessfulValidation, ValidationRepair,
@@ -146,6 +147,8 @@ pub struct ToolScope {
     probes: Arc<Mutex<BTreeMap<String, Probe>>>,
     acceptance_ledger: Arc<Mutex<AcceptanceLedgerState>>,
     tool_surface: Arc<Mutex<ToolSurface>>,
+    /// Model-run shell commands that are not declared probes, in run order.
+    observed_commands: Arc<Mutex<Vec<ObservedCommand>>>,
     /// Cancelled when the run is asked to stop; a running command is killed.
     cancellation: CancellationToken,
 }
@@ -254,8 +257,9 @@ struct ToolPayloadMeasurement {
     max_tool_result_kind: Option<String>,
 }
 
+/// A file's length, modification time and (up to 2 MB) content hash.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct FileFingerprint {
+pub(crate) struct FileFingerprint {
     len: u64,
     modified_nanos: Option<u128>,
     content_hash: Option<u64>,
@@ -345,6 +349,7 @@ impl ToolScope {
             probes: Arc::new(Mutex::new(BTreeMap::new())),
             acceptance_ledger: Arc::new(Mutex::new(AcceptanceLedgerState::default())),
             tool_surface: Arc::new(Mutex::new(ToolSurface::Control)),
+            observed_commands: Arc::new(Mutex::new(Vec::new())),
             cancellation: CancellationToken::new(),
         })
     }
@@ -656,8 +661,53 @@ impl ToolScope {
     fn shell_mutation_snapshot(&self) -> Result<BTreeMap<String, FileFingerprint>> {
         let ignore = self.workspace_ignore()?;
         let mut snapshot = BTreeMap::new();
-        collect_shell_mutation_snapshot(self, &self.root, &ignore, &mut snapshot)?;
+        let filter = SnapshotFilter {
+            include: &|relative| {
+                self.profile()
+                    .path_requires_validation_after_write(relative)
+            },
+            excluded: &[],
+            max_files: None,
+        };
+        collect_snapshot(self, &self.root, &ignore, &filter, &mut snapshot)?;
         Ok(snapshot)
+    }
+
+    /// Every visible project file, under the same visibility rules and
+    /// fingerprints as shell-mutation sensing. Paths under `excluded`
+    /// (absolute; the harness's own files) are skipped. A project with more
+    /// than `MAX_SNAPSHOT_FILES` files is an error naming that limit.
+    pub(crate) fn workspace_snapshot(
+        &self,
+        excluded: &[PathBuf],
+    ) -> Result<BTreeMap<String, FileFingerprint>> {
+        let ignore = self.workspace_ignore()?;
+        let mut snapshot = BTreeMap::new();
+        let filter = SnapshotFilter {
+            include: &|_| true,
+            excluded,
+            max_files: Some(MAX_SNAPSHOT_FILES),
+        };
+        collect_snapshot(self, &self.root, &ignore, &filter, &mut snapshot)?;
+        Ok(snapshot)
+    }
+
+    /// Model-run shell commands that were not declared probes, in run order.
+    pub fn observed_commands(&self) -> Vec<ObservedCommand> {
+        self.observed_commands
+            .lock()
+            .expect("observed commands mutex poisoned")
+            .clone()
+    }
+
+    fn note_observed_command(&self, command: &str, exit_code: Option<i32>) {
+        self.observed_commands
+            .lock()
+            .expect("observed commands mutex poisoned")
+            .push(ObservedCommand {
+                command: command.to_owned(),
+                exit_code,
+            });
     }
 
     fn note_read_target(&self, path: &Path) {
@@ -1873,10 +1923,21 @@ impl WorkspaceIgnore {
     }
 }
 
-fn collect_shell_mutation_snapshot(
+/// Which visible files a snapshot keeps.
+struct SnapshotFilter<'a> {
+    /// Keep a file by its project-relative path.
+    include: &'a dyn Fn(&str) -> bool,
+    /// Absolute paths (files or directories) to skip entirely.
+    excluded: &'a [PathBuf],
+    /// Stop with an error beyond this many kept files.
+    max_files: Option<usize>,
+}
+
+fn collect_snapshot(
     scope: &ToolScope,
     dir: &Path,
     ignore: &WorkspaceIgnore,
+    filter: &SnapshotFilter<'_>,
     snapshot: &mut BTreeMap<String, FileFingerprint>,
 ) -> Result<()> {
     let mut children = fs::read_dir(dir)
@@ -1886,6 +1947,13 @@ fn collect_shell_mutation_snapshot(
     children.sort_by_key(|entry| entry.path());
     for child in children {
         let path = child.path();
+        if filter
+            .excluded
+            .iter()
+            .any(|excluded| path.starts_with(excluded))
+        {
+            continue;
+        }
         let metadata = child
             .metadata()
             .with_context(|| format!("reading metadata {}", path.display()))?;
@@ -1896,13 +1964,15 @@ fn collect_shell_mutation_snapshot(
             continue;
         }
         if metadata.is_dir() {
-            collect_shell_mutation_snapshot(scope, &path, ignore, snapshot)?;
+            collect_snapshot(scope, &path, ignore, filter, snapshot)?;
         } else if metadata.is_file() {
             let relative = scope.relative_display(&path);
-            if scope
-                .profile()
-                .path_requires_validation_after_write(&relative)
-            {
+            if (filter.include)(&relative) {
+                if let Some(max) = filter.max_files
+                    && snapshot.len() >= max
+                {
+                    bail!("more than {max} files; changes not tracked");
+                }
                 snapshot.insert(relative, file_fingerprint(&path, &metadata)?);
             }
         }
@@ -3789,13 +3859,23 @@ impl ShellCommandTool {
             Some(Ok(result)) => result.with_context(|| format!("running command {command:?}"))?,
             Some(Err(_elapsed)) => {
                 end_process_group(child_pid);
+                if !validation_probe {
+                    self.scope.note_observed_command(command, None);
+                }
                 bail!("command timed out after {timeout_secs}s");
             }
             None => {
                 end_process_group(child_pid);
+                if !validation_probe {
+                    self.scope.note_observed_command(command, None);
+                }
                 bail!("command cancelled");
             }
         };
+        if !validation_probe {
+            self.scope
+                .note_observed_command(command, output.status.code());
+        }
         let stdout = capture_output(&output.stdout);
         let stderr = capture_output(&output.stderr);
         self.scope
@@ -6199,6 +6279,101 @@ bytes[0..5] \"cafe\\n\""
             .collect::<Vec<_>>();
         assert!(!paths.contains(&"ignored.txt"));
         assert!(!paths.contains(&"cache"));
+    }
+
+    #[test]
+    fn a_workspace_snapshot_sees_every_visible_file_except_the_harness_own() {
+        let temp = tempfile::tempdir().unwrap();
+        let scope = scope(&temp);
+        let root = scope.root.as_ref().clone();
+        for (path, text) in [
+            ("notes.md", "notes\n"),
+            ("src/lib.rs", "pub fn f() {}\n"),
+            ("traces/run.jsonl", "{}\n"),
+            ("ignored.log", "x\n"),
+            (".gitignore", "*.log\n"),
+            ("throughput.jsonl", "{}\n"),
+        ] {
+            let full = root.join(path);
+            std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+            std::fs::write(full, text).unwrap();
+        }
+        let snapshot = scope
+            .workspace_snapshot(&[root.join("traces"), root.join("throughput.jsonl")])
+            .unwrap();
+        assert_eq!(
+            snapshot.keys().map(String::as_str).collect::<Vec<_>>(),
+            [".gitignore", "notes.md", "src/lib.rs"]
+        );
+        // Shell-mutation sensing still keeps only files that need validation.
+        let sensed = scope.shell_mutation_snapshot().unwrap();
+        assert!(sensed.contains_key("src/lib.rs"));
+        assert!(!sensed.contains_key("notes.md") && !sensed.contains_key(".gitignore"));
+        let ignore = scope.workspace_ignore().unwrap();
+        let mut capped = BTreeMap::new();
+        let error = collect_snapshot(
+            &scope,
+            &root,
+            &ignore,
+            &SnapshotFilter {
+                include: &|_| true,
+                excluded: &[],
+                max_files: Some(2),
+            },
+            &mut capped,
+        )
+        .unwrap_err();
+        assert_eq!(error.to_string(), "more than 2 files; changes not tracked");
+    }
+
+    #[tokio::test]
+    async fn model_run_commands_are_observed_and_declared_probes_are_not() {
+        let temp = tempfile::tempdir().unwrap();
+        let scope = scope(&temp);
+        let tool = ShellCommandTool {
+            scope: scope.clone(),
+        };
+        tool.shell(&HashMap::from([("command".to_string(), json!("true"))]))
+            .await
+            .unwrap();
+        tool.shell_declared_probe("check", "true").await.unwrap();
+        tool.shell(&HashMap::from([("command".to_string(), json!("exit 3"))]))
+            .await
+            .unwrap();
+        assert_eq!(
+            scope.observed_commands(),
+            [
+                ObservedCommand {
+                    command: "true".into(),
+                    exit_code: Some(0)
+                },
+                ObservedCommand {
+                    command: "exit 3".into(),
+                    exit_code: Some(3)
+                },
+            ]
+        );
+    }
+
+    /// The run report's unchecked paths are the pending evidence paths:
+    /// source files written since the last passing check.
+    #[test]
+    fn source_writes_stay_unchecked_until_a_passing_check() {
+        let temp = tempfile::tempdir().unwrap();
+        let scope = scope(&temp);
+        scope
+            .note_write_intent(&[scope.root.join("src/lib.rs"), scope.root.join("README.md")])
+            .unwrap();
+        let pending = |scope: &ToolScope| {
+            scope
+                .runtime_state_snapshot()
+                .pending_evidence_paths
+                .into_keys()
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(pending(&scope), ["src/lib.rs"]);
+        scope.note_validation_probe();
+        assert!(pending(&scope).is_empty());
     }
 
     #[tokio::test]

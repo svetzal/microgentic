@@ -100,15 +100,18 @@ Rapid attempts sharing a trace directory can therefore fail before work starts.
   loop: `replied`, `done`, `failed`, `withheld` by a named gate when the
   iteration budget ends after a rejected claim, `hard_stop` with its cause,
   plus `cancelled`, `error`, and `usage` for runs without a summary.
-- [ ] Present the same outcome in plain output, JSON, and the TUI. Report changed
+- [x] Present the same outcome in plain output, JSON, and the TUI. Report changed
   paths, check results, checks not run, stop reason, and evidence location when
   relevant. Describe changes relative to the starting workspace, including
   pre-existing edits.
   An ordinary chat reply needs neither a task scorecard nor an evidence footer.
-  Progress: the outcome, stop reason, and trace location reach stderr, the
-  `--json` summary's `outcome` field, and the conversation view's closing line
-  and `Stopped` status; a successful reply adds nothing. Changed paths and
-  check results are not reported yet.
+  Note: the outcome, stop reason, and trace location reach stderr, `--json`,
+  and the conversation view (2026-10-17). The summary's `changes` compares the
+  project at run start and end, by tool or shell, and flags paths with
+  uncommitted Git edits from before the run; `checks` separates declared
+  probes (passed, failed, not run, stale) from commands the model chose to run,
+  and lists source changed after the last passing check. Plain `run` and the
+  conversation view print the same lines only when something changed or ran.
 - [x] Map public `run` outcomes to documented exit codes. Exercise returned `FAIL`,
   provider failure, exhausted budgets, unchecked completion, and cancellation
   through the installed binary. Check redirected stdout and stderr separately.
@@ -190,7 +193,9 @@ initial-context catalog.
   follow-up requests, and explicit benchmark isolation using scripted gateways.
   Progress: scripted gateway tests cover nested guidance delivery, guidance
   changes between follow-up requests, and benchmark isolation; unit tests
-  cover ignored files. A dirty-repository case is not tested yet.
+  cover ignored files. A scripted dirty-repository run now checks that
+  pre-existing edits are reported apart from the run's own changes; nested
+  guidance and follow-ups in a dirty repository are not combined in one test.
 
 This slice changes model context. Register the hypothesis and comparison cell
 before making capability claims; preserve exact provider requests for causal review.
@@ -376,13 +381,14 @@ the first public alpha usable; P2 extends it after core workflows work.
 - [ ] **Define plan/apply semantics.** Preview concrete edits and command effects;
   retain the approved proposal instead of regenerating it on apply. Planning
   must not run arbitrary mutating shell. Label provider usage and session writes.
-- [ ] **Define typed outcomes.** Share one outcome between runtime, CLI, JSON,
+- [x] **Define typed outcomes.** Share one outcome between runtime, CLI, JSON,
   TUI, and exit status. Include checks passed/failed/not run, changed paths,
   stop reason, and evidence location. Test returned `FAIL` as well as errors.
-  Progress: one `RunOutcome` is shared by the runtime, `run`, `--json`, the
+  Note: one `RunOutcome` is shared by the runtime, `run`, `--json`, the
   conversation view, and the exit status, with stop reason and evidence
-  location, and returned `FAIL` is tested beside errors (section 1 above).
-  Checks passed/failed/not run and changed paths remain.
+  location, and returned `FAIL` is tested beside errors. The summary's
+  `changes` and `checks` carry changed paths and checks passed, failed, and
+  not run to the same surfaces (section 1 above).
 - [ ] **Budget interface overhead.** Establish startup/help latency, installation
   size, idle memory, and input/render responsiveness baselines; set explicit
   release budgets from those measurements. Keep model/tool timing separate and

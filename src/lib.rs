@@ -20,6 +20,7 @@ pub mod provenance;
 pub mod recovery;
 mod residency;
 pub mod retry;
+pub mod run_report;
 pub mod runtime;
 pub mod runtime_events;
 pub mod semantic_advisory;
