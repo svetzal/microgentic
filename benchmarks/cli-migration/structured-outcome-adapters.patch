@@ -1,0 +1,420 @@
+--- a/Benchmarks/deep-swe/adapter/adaptive_harness_agent.py
++++ b/Benchmarks/deep-swe/adapter/adaptive_harness_agent.py
+@@ -207,6 +207,60 @@
+             "terminal": {"done_token": "DONE", "fail_token": "FAIL"},
+         }
+ 
++    async def _terminal_event(self, environment: BaseEnvironment) -> dict[str, Any] | None:
++        """The run's last `run.finished` or `run.failed` trace record.
++
++        Microgentic writes the typed outcome there (`payload.outcome`), so the
++        attempt is classified from recorded fields rather than from the exit
++        code or the summary text. Returns None when no terminal record exists.
++        """
++        result = await environment.exec(
++            command=(
++                f"cat {shlex.quote(self.REMOTE_TRACE_DIR)}/*.jsonl 2>/dev/null"
++                " | grep -E '\"kind\":\"run\\.(finished|failed)\"' | tail -n 1"
++            )
++        )
++        lines = (result.stdout or "").strip().splitlines()
++        if not lines:
++            return None
++        try:
++            event = json.loads(lines[-1])
++        except json.JSONDecodeError:
++            return None
++        return event if isinstance(event, dict) else None
++
++    async def _record_terminal(
++        self,
++        environment: BaseEnvironment,
++        context: AgentContext,
++        return_code: int,
++        output: str,
++    ) -> None:
++        """Record the typed outcome and keep the batch-stop rules.
++
++        A nonzero exit with a `run.failed` record is a scored harness failure;
++        without one it is an adapter or environment failure. A zero exit must
++        come with a `run.finished` record.
++        """
++        terminal = await self._terminal_event(environment)
++        kind = terminal.get("kind") if terminal else None
++        payload = (terminal or {}).get("payload") or {}
++        context.metadata["harness_terminal_event"] = kind
++        # None for a provider or environment error, and for traces written by
++        # binaries older than Microgentic's typed outcomes.
++        context.metadata["harness_outcome"] = payload.get("outcome")
++        if return_code != 0:
++            if kind == "run.failed":
++                context.metadata["outcome"] = "harness_failure"
++                return
++            raise RuntimeError(
++                f"adaptive harness failed with exit code {return_code}: {output}"
++            )
++        if kind != "run.finished":
++            raise RuntimeError(
++                "adaptive harness exited 0 without a run.finished trace record"
++            )
++
+     async def _terminate_harness(self, environment: BaseEnvironment) -> None:
+         cleanup = f"""
+ session_pids() {{
+@@ -419,17 +473,6 @@
+                 "workspace_snapshot": "committed_after_agent_exit",
+             }
+         )
+-        if result.return_code != 0:
+-            trace_check = await environment.exec(
+-                command=(
+-                    'grep -q \'"kind":"run.failed"\' '
+-                    f"{shlex.quote(self.REMOTE_TRACE_DIR)}/*.jsonl"
+-                )
+-            )
+-            if trace_check.return_code == 0:
+-                context.metadata["outcome"] = "harness_failure"
+-                return
+-            raise RuntimeError(
+-                "adaptive harness failed "
+-                f"with exit code {result.return_code}: {result.stderr or result.stdout}"
+-            )
++        await self._record_terminal(
++            environment, context, result.return_code, result.stderr or result.stdout
++        )
+--- a/Benchmarks/deep-swe/scripts/test_microgentic_adapter.py
++++ b/Benchmarks/deep-swe/scripts/test_microgentic_adapter.py
+@@ -17,10 +17,21 @@
+     stderr: str = ""
+ 
+ 
++def terminal_record(kind, outcome=None):
++    """One trace line as Microgentic writes it (compact JSON)."""
++    payload = {"final_summary": "unused"}
++    if outcome is not None:
++        payload["outcome"] = outcome
++    return json.dumps({"timestamp": "2026-10-17T00:00:00Z", "kind": kind, "payload": payload},
++                      separators=(",", ":"))
++
++
+ class Environment:
+-    def __init__(self):
++    def __init__(self, run_return_code=0, terminal=terminal_record("run.finished", {"kind": "done"})):
+         self.commands = []
+         self.uploads = {}
++        self.run_return_code = run_return_code
++        self.terminal = terminal
+ 
+     def agent_process_env(self, values):
+         return values
+@@ -30,9 +41,21 @@
+ 
+     async def exec(self, command, **kwargs):
+         self.commands.append(command)
++        if "microgentic benchmark run" in command:
++            return Result(return_code=self.run_return_code, stderr="run failed")
++        if "run\\.(finished|failed)" in command:
++            return Result(stdout=f"{self.terminal}\n" if self.terminal else "")
+         return Result()
+ 
+ 
++def make_agent(tmp_path):
++    binary = tmp_path / "microgentic"
++    binary.write_bytes(b"test-binary")
++    binary.with_name("ca-certificates.crt").write_bytes(b"test-ca")
++    return AdaptiveHarnessAgent(logs_dir=tmp_path / "logs", binary_path=binary,
++                                model_name="ollama/qwen-test")
++
++
+ @pytest.mark.asyncio
+ async def test_public_prompt_and_controls_preserve_the_registered_contract(tmp_path):
+     binary = tmp_path / "microgentic"
+@@ -59,6 +82,8 @@
+     assert "--json" not in args
+     assert context.metadata["provider"] == "ollama"
+     assert context.metadata["workspace_snapshot"] == "committed_after_agent_exit"
++    assert context.metadata["harness_terminal_event"] == "run.finished"
++    assert context.metadata["harness_outcome"] == {"kind": "done"}
+ 
+ 
+ def test_selected_provider_routes_network_and_model_prefix(tmp_path):
+@@ -70,3 +95,32 @@
+                                  extra_env={"OMLX_HOST": "http://my-omlx.example:8000"})
+     assert agent._ollama_model() == "test"
+     assert agent.network_allowlist().domains == ["my-omlx.example"]
++
++
++@pytest.mark.asyncio
++async def test_a_withheld_completion_is_recorded_without_failing_the_attempt(tmp_path):
++    withheld = {"kind": "withheld", "gate": "probes", "detail": "probe `check` missing"}
++    environment = Environment(terminal=terminal_record("run.finished", withheld))
++    context = AgentContext()
++    await make_agent(tmp_path).run("Do the task", environment, context)
++    assert context.metadata["harness_outcome"] == withheld
++    assert "outcome" not in context.metadata
++
++
++@pytest.mark.asyncio
++async def test_a_stream_hard_stop_is_a_scored_harness_failure(tmp_path):
++    stop = {"kind": "hard_stop", "cause": "no_content_stream", "detail": "no content"}
++    environment = Environment(run_return_code=1, terminal=terminal_record("run.failed", stop))
++    context = AgentContext()
++    await make_agent(tmp_path).run("Do the task", environment, context)
++    assert context.metadata["outcome"] == "harness_failure"
++    assert context.metadata["harness_outcome"] == stop
++    assert context.metadata["return_code"] == 1
++
++
++@pytest.mark.asyncio
++async def test_exits_without_the_matching_terminal_record_stop_the_batch(tmp_path):
++    with pytest.raises(RuntimeError, match="without a run.finished"):
++        await make_agent(tmp_path).run("Do the task", Environment(terminal=None), AgentContext())
++    with pytest.raises(RuntimeError, match="exit code 1"):
++        await make_agent(tmp_path).run("Do the task", Environment(run_return_code=1), AgentContext())
+--- a/Benchmarks/terminal-bench-2.1/adapter/adaptive_harness_agent.py
++++ b/Benchmarks/terminal-bench-2.1/adapter/adaptive_harness_agent.py
+@@ -184,6 +184,60 @@
+             "terminal": {"done_token": "DONE", "fail_token": "FAIL"},
+         }
+ 
++    async def _terminal_event(self, environment: BaseEnvironment) -> dict[str, Any] | None:
++        """The run's last `run.finished` or `run.failed` trace record.
++
++        Microgentic writes the typed outcome there (`payload.outcome`), so the
++        attempt is classified from recorded fields rather than from the exit
++        code or the summary text. Returns None when no terminal record exists.
++        """
++        result = await environment.exec(
++            command=(
++                f"cat {shlex.quote(self.REMOTE_TRACE_DIR)}/*.jsonl 2>/dev/null"
++                " | grep -E '\"kind\":\"run\\.(finished|failed)\"' | tail -n 1"
++            )
++        )
++        lines = (result.stdout or "").strip().splitlines()
++        if not lines:
++            return None
++        try:
++            event = json.loads(lines[-1])
++        except json.JSONDecodeError:
++            return None
++        return event if isinstance(event, dict) else None
++
++    async def _record_terminal(
++        self,
++        environment: BaseEnvironment,
++        context: AgentContext,
++        return_code: int,
++        output: str,
++    ) -> None:
++        """Record the typed outcome and keep the batch-stop rules.
++
++        A nonzero exit with a `run.failed` record is a scored harness failure;
++        without one it is an adapter or environment failure. A zero exit must
++        come with a `run.finished` record.
++        """
++        terminal = await self._terminal_event(environment)
++        kind = terminal.get("kind") if terminal else None
++        payload = (terminal or {}).get("payload") or {}
++        context.metadata["harness_terminal_event"] = kind
++        # None for a provider or environment error, and for traces written by
++        # binaries older than Microgentic's typed outcomes.
++        context.metadata["harness_outcome"] = payload.get("outcome")
++        if return_code != 0:
++            if kind == "run.failed":
++                context.metadata["outcome"] = "harness_failure"
++                return
++            raise RuntimeError(
++                f"adaptive harness failed with exit code {return_code}: {output}"
++            )
++        if kind != "run.finished":
++            raise RuntimeError(
++                "adaptive harness exited 0 without a run.finished trace record"
++            )
++
+     async def _terminate_harness(self, environment: BaseEnvironment) -> None:
+         cleanup = f"""
+ session_pids() {{
+@@ -306,17 +360,6 @@
+             "contract_probe_count": len(self.contract_probes),
+             "contract_probes_sha256": self.contract_probes_sha256,
+         }
+-        if result.return_code != 0:
+-            trace_check = await environment.exec(
+-                command=(
+-                    "grep -q '\"kind\":\"run.failed\"' "
+-                    f"{shlex.quote(self.REMOTE_TRACE_DIR)}/*.jsonl"
+-                )
+-            )
+-            if trace_check.return_code == 0:
+-                context.metadata["outcome"] = "harness_failure"
+-                return
+-            raise RuntimeError(
+-                "adaptive harness failed "
+-                f"with exit code {result.return_code}: {result.stderr or result.stdout}"
+-            )
++        await self._record_terminal(
++            environment, context, result.return_code, result.stderr or result.stdout
++        )
+--- a/Benchmarks/terminal-bench-2.1/adapter/tests/test_adaptive_harness_agent.py
++++ b/Benchmarks/terminal-bench-2.1/adapter/tests/test_adaptive_harness_agent.py
+@@ -20,16 +20,34 @@
+     stderr: str = ""
+ 
+ 
++def terminal_record(kind: str, outcome: dict[str, object] | None = None) -> str:
++    """One trace line as Microgentic writes it (compact JSON)."""
++    payload: dict[str, object] = {"final_summary": "unused"}
++    if outcome is not None:
++        payload["outcome"] = outcome
++    return json.dumps(
++        {"timestamp": "2026-10-17T00:00:00Z", "kind": kind, "payload": payload},
++        separators=(",", ":"),
++    )
++
++
++DONE = terminal_record("run.finished", {"kind": "done"})
++
++
+ class FakeEnvironment:
+     def __init__(
+         self,
+         run_return_code: int = 0,
+         recorded_harness_failure: bool = False,
+         cancel_run: bool = False,
++        terminal: str | None = DONE,
+     ) -> None:
+         self.run_return_code = run_return_code
+         self.recorded_harness_failure = recorded_harness_failure
+         self.cancel_run = cancel_run
++        self.terminal = (
++            terminal_record("run.failed") if recorded_harness_failure else terminal
++        )
+         self.commands: list[tuple[str, str | int | None]] = []
+         self.uploads: dict[str, bytes] = {}
+ 
+@@ -44,9 +62,13 @@
+             if self.cancel_run:
+                 raise asyncio.CancelledError
+             return FakeResult(return_code=self.run_return_code, stderr="run failed")
+-        if "grep -q" in command:
+-            return FakeResult(return_code=0 if self.recorded_harness_failure else 1)
++        if "run\\.(finished|failed)" in command:
++            return FakeResult(stdout=f"{self.terminal}\n" if self.terminal else "")
+         return FakeResult()
++
++
++def run_command_of(environment: FakeEnvironment) -> str:
++    return next(c for c, _ in environment.commands if "microgentic benchmark run" in c)
+ 
+ 
+ def make_agent(tmp_path: Path, **kwargs: object) -> AdaptiveHarnessAgent:
+@@ -93,7 +115,7 @@
+     assert contract["probes"] == []
+     assert contract["read_scope"] == ["./**"]
+     assert contract["write_scope"] == ["./**"]
+-    run_command = environment.commands[-1][0]
++    run_command = run_command_of(environment)
+     assert f"--experiment {agent.REMOTE_EXPERIMENT}" in run_command
+     assert f"--trace-dir {agent.REMOTE_TRACE_DIR}" in run_command
+     assert "--model qwen-test" in run_command
+@@ -130,7 +152,7 @@
+ @pytest.mark.asyncio
+ async def test_run_propagates_failure_without_harness_trace(tmp_path: Path) -> None:
+     agent = make_agent(tmp_path)
+-    environment = FakeEnvironment(run_return_code=7)
++    environment = FakeEnvironment(run_return_code=7, terminal=None)
+ 
+     with pytest.raises(RuntimeError, match="exit code 7"):
+         await agent.run("Do the task", environment, AgentContext())  # type: ignore[arg-type]
+@@ -166,7 +188,7 @@
+ 
+     await agent.run("Do the task", environment, AgentContext())  # type: ignore[arg-type]
+ 
+-    run_command = environment.commands[-1][0]
++    run_command = run_command_of(environment)
+     assert "--action-boundary-interrupt-tokens 16384" in run_command
+ 
+ 
+@@ -177,7 +199,7 @@
+ 
+     await agent.run("Do the task", environment, AgentContext())  # type: ignore[arg-type]
+ 
+-    run_command = environment.commands[-1][0]
++    run_command = run_command_of(environment)
+     assert "--repair-handoff-policy constrained" in run_command
+ 
+ 
+@@ -410,3 +432,73 @@
+         else:
+             assert '"phase": "observed"' in completed.stdout
+             assert '"phase": "passed"' not in completed.stdout
++
++
++@pytest.mark.asyncio
++async def test_run_records_the_typed_outcome_from_the_terminal_record(
++    tmp_path: Path,
++) -> None:
++    agent = make_agent(tmp_path)
++    withheld = {"kind": "withheld", "gate": "stash", "detail": "new stash object IDs"}
++    environment = FakeEnvironment(terminal=terminal_record("run.finished", withheld))
++    context = AgentContext()
++
++    await agent.run("Do the task", environment, context)  # type: ignore[arg-type]
++
++    assert context.metadata is not None
++    assert context.metadata["harness_terminal_event"] == "run.finished"
++    assert context.metadata["harness_outcome"] == withheld
++    # Benchmark mode exits 0 for any summary; only a run.failed is scored as
++    # a harness failure.
++    assert "outcome" not in context.metadata
++
++
++@pytest.mark.asyncio
++async def test_run_records_a_stream_hard_stop_from_run_failed(tmp_path: Path) -> None:
++    agent = make_agent(tmp_path)
++    stop = {"kind": "hard_stop", "cause": "inspection_loop", "detail": "list_tree x4"}
++    environment = FakeEnvironment(
++        run_return_code=1, terminal=terminal_record("run.failed", stop)
++    )
++    context = AgentContext()
++
++    await agent.run("Do the task", environment, context)  # type: ignore[arg-type]
++
++    assert context.metadata is not None
++    assert context.metadata["outcome"] == "harness_failure"
++    assert context.metadata["harness_terminal_event"] == "run.failed"
++    assert context.metadata["harness_outcome"] == stop
++
++
++@pytest.mark.asyncio
++async def test_a_trace_without_an_outcome_is_still_accepted(tmp_path: Path) -> None:
++    # Binaries older than typed outcomes write run.finished without one.
++    agent = make_agent(tmp_path)
++    environment = FakeEnvironment(terminal=terminal_record("run.finished"))
++    context = AgentContext()
++
++    await agent.run("Do the task", environment, context)  # type: ignore[arg-type]
++
++    assert context.metadata is not None
++    assert context.metadata["harness_terminal_event"] == "run.finished"
++    assert context.metadata["harness_outcome"] is None
++
++
++@pytest.mark.asyncio
++async def test_a_clean_exit_without_a_terminal_record_stops_the_batch(
++    tmp_path: Path,
++) -> None:
++    agent = make_agent(tmp_path)
++    environment = FakeEnvironment(terminal=None)
++
++    with pytest.raises(RuntimeError, match="without a run.finished"):
++        await agent.run("Do the task", environment, AgentContext())  # type: ignore[arg-type]
++
++
++@pytest.mark.asyncio
++async def test_a_failed_exit_with_only_run_finished_is_not_scored(tmp_path: Path) -> None:
++    agent = make_agent(tmp_path)
++    environment = FakeEnvironment(run_return_code=1)
++
++    with pytest.raises(RuntimeError, match="exit code 1"):
++        await agent.run("Do the task", environment, AgentContext())  # type: ignore[arg-type]

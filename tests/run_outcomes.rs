@@ -36,6 +36,40 @@ fn summary(output: &Output) -> Value {
     })
 }
 
+/// The run's terminal trace event carries the same outcome as the summary,
+/// and its identifying fields match the named case of the contract that the
+/// benchmark classifier reads (benchmarks/fixtures/terminal_outcome_contract.json).
+fn assert_terminal_contract(case: &str, summary: &Value) {
+    let contract: Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("benchmarks/fixtures/terminal_outcome_contract.json"),
+        )
+        .expect("the outcome contract"),
+    )
+    .expect("the outcome contract is JSON");
+    let expected = contract["cases"]
+        .as_array()
+        .expect("contract cases")
+        .iter()
+        .find(|entry| entry["name"] == case)
+        .unwrap_or_else(|| panic!("no contract case {case}"));
+    let trace = std::path::PathBuf::from(summary["trace_file"].as_str().expect("trace path"));
+    let terminal = trace_records(&trace)
+        .into_iter()
+        .rfind(|record| record["kind"] == "run.finished" || record["kind"] == "run.failed")
+        .expect("a terminal trace event");
+    assert_eq!(terminal["kind"], expected["terminal_kind"], "{case}");
+    let outcome = &terminal["payload"]["outcome"];
+    assert_eq!(
+        outcome, &summary["outcome"],
+        "{case}: trace and summary differ"
+    );
+    for (field, value) in expected["outcome"].as_object().expect("contract outcome") {
+        assert_eq!(&outcome[field], value, "{case}: outcome {field}");
+    }
+}
+
 /// The `microgentic: …` line the public executable writes when a run did not
 /// finish its work.
 fn diagnostic(output: &Output) -> Option<String> {
@@ -144,6 +178,7 @@ fn done(wire: Wire) {
     let output = task(microgentic(), &["run"], &provider, &workspace, &["--json"]);
     assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
     assert_eq!(summary(&output)["outcome"], json!({"kind": "done"}));
+    assert_terminal_contract("done", &summary(&output));
     assert_eq!(diagnostic(&output), None, "{}", stderr(&output));
 
     let output = task(legacy_binary(), &["run"], &provider, &workspace, &[]);
@@ -193,6 +228,7 @@ fn failed(wire: Wire) {
         json["outcome"],
         json!({"kind": "failed", "reason": FAIL_TEXT})
     );
+    assert_terminal_contract("failed", &json);
     assert_eq!(
         diagnostic(&output).as_deref(),
         Some(
@@ -217,6 +253,8 @@ fn failed(wire: Wire) {
         summary(&output)["outcome"],
         json!({"kind": "failed", "reason": FAIL_TEXT})
     );
+    // Benchmark adapters read the same contract from the benchmark trace.
+    assert_terminal_contract("failed", &summary(&output));
     assert_eq!(diagnostic(&output), None, "{}", stderr(&output));
 
     let output = task(legacy_binary(), &["run"], &provider, &workspace, &[]);
@@ -271,6 +309,7 @@ fn withheld_by_validation(wire: Wire) {
     let outcome = &summary(&output)["outcome"];
     assert_eq!(outcome["kind"], "withheld");
     assert_eq!(outcome["gate"], "validation");
+    assert_terminal_contract("withheld_validation", &summary(&output));
     assert_eq!(
         outcome["detail"],
         "edits were not validated before the reply"
@@ -323,6 +362,7 @@ fn a_new_stash_before_done_exits_four_as_withheld_by_the_stash_gate() {
     let outcome = &summary(&output)["outcome"];
     assert_eq!(outcome["kind"], "withheld");
     assert_eq!(outcome["gate"], "stash");
+    assert_terminal_contract("withheld_stash", &summary(&output));
     let detail = outcome["detail"].as_str().expect("detail");
     assert!(
         detail.starts_with("new stash object IDs: [\"")
@@ -378,6 +418,7 @@ fn an_unrun_probe_before_done_exits_four_as_withheld_by_the_probe_gate() {
     let outcome = &summary(&output)["outcome"];
     assert_eq!(outcome["kind"], "withheld");
     assert_eq!(outcome["gate"], "probes");
+    assert_terminal_contract("withheld_probes", &summary(&output));
     assert_eq!(outcome["detail"], "probe `check` missing");
 }
 
@@ -412,6 +453,7 @@ fn iteration_budget(wire: Wire) {
     let outcome = &summary(&output)["outcome"];
     assert_eq!(outcome["kind"], "hard_stop");
     assert_eq!(outcome["cause"], "iteration_budget");
+    assert_terminal_contract("iteration_budget", &summary(&output));
     assert_eq!(outcome["detail"], "2 turns used; last: Still looking.");
     assert_eq!(
         provider.request_count(),
@@ -448,6 +490,7 @@ fn repeated_empty_responses_exit_five_as_an_empty_response_hard_stop() {
     let outcome = &summary(&output)["outcome"];
     assert_eq!(outcome["kind"], "hard_stop");
     assert_eq!(outcome["cause"], "empty_response");
+    assert_terminal_contract("empty_response", &summary(&output));
     assert_eq!(
         outcome["detail"],
         "turn 3 produced 3 consecutive empty responses with no tool calls or final text"

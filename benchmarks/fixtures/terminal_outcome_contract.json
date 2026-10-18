@@ -1,0 +1,13 @@
+{
+  "schema_version": "microgentic_terminal_outcome_contract.v1",
+  "description": "Typed outcomes that Microgentic writes in its terminal trace event, and the label benchmarks/terminal_outcome.py gives each. tests/run_outcomes.rs checks that the binary writes these outcomes; benchmarks/test_terminal_outcome.py checks the labels. Only the identifying fields are listed; detail and reason text varies by run.",
+  "cases": [
+    {"name": "done", "terminal_kind": "run.finished", "outcome": {"kind": "done"}, "label": "done"},
+    {"name": "failed", "terminal_kind": "run.finished", "outcome": {"kind": "failed"}, "label": "fail"},
+    {"name": "withheld_validation", "terminal_kind": "run.finished", "outcome": {"kind": "withheld", "gate": "validation"}, "label": "withheld_validation"},
+    {"name": "withheld_stash", "terminal_kind": "run.finished", "outcome": {"kind": "withheld", "gate": "stash"}, "label": "withheld_stash"},
+    {"name": "withheld_probes", "terminal_kind": "run.finished", "outcome": {"kind": "withheld", "gate": "probes"}, "label": "withheld_probes"},
+    {"name": "iteration_budget", "terminal_kind": "run.finished", "outcome": {"kind": "hard_stop", "cause": "iteration_budget"}, "label": "outer_turn_limit"},
+    {"name": "empty_response", "terminal_kind": "run.finished", "outcome": {"kind": "hard_stop", "cause": "empty_response"}, "label": "empty_response_stop"}
+  ]
+}

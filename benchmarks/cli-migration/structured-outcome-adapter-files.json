@@ -1,0 +1,27 @@
+{
+  "schema_version": "microgentic_benchmark_adapter_migration.v1",
+  "baseline_harness_revision": "9144bc5",
+  "change": "Adapters classify from the typed outcome in the run terminal trace record instead of grepping for run.failed",
+  "files": [
+    {
+      "path": "Benchmarks/deep-swe/adapter/adaptive_harness_agent.py",
+      "baseline_sha256": "f459455379022ae9f373ff8566c9217faba0bd57c122d7119732c493ee1e51a1",
+      "sha256": "d08538f5530a32eeeda1eed28229de4a4b5c46ce729c9596a7f291ef54802ef7"
+    },
+    {
+      "path": "Benchmarks/deep-swe/scripts/test_microgentic_adapter.py",
+      "baseline_sha256": "ac2dffe90691d822bf99abf9c6e3966601967b626352072ddae0ebada6ee50ba",
+      "sha256": "90388325098767d7056c884c5185667671043185b4bc0a9c7cf1ac0bd736ca69"
+    },
+    {
+      "path": "Benchmarks/terminal-bench-2.1/adapter/adaptive_harness_agent.py",
+      "baseline_sha256": "ba61da4e5f5548fcd6011f4853e2f9af2df839b416d5f548dd8f2c2219a05068",
+      "sha256": "d5f67b6ecb2aaa7b80241197787a963cf38783a7f48fd10d4860fba737272980"
+    },
+    {
+      "path": "Benchmarks/terminal-bench-2.1/adapter/tests/test_adaptive_harness_agent.py",
+      "baseline_sha256": "f2342a4d59c00d29b4cc9fdaa6e1bc7d8a508e7f5c895da6b2ad0a0eaf9ff1f1",
+      "sha256": "de6f922e959759f86c36c1be4d8fc8fe341a424794520767c04bbca289832094"
+    }
+  ]
+}

@@ -445,9 +445,17 @@ identified by source review, not newly executed benchmark results.
   terminal status, with trace evidence for diagnosis. Distinguish incomplete work,
   provider failure, environment failure, cancellation, and verified success.
   Preserve batch-stop rules and independent verifier authority.
-  Progress: the benchmark summary and the `run.finished` trace event now carry
-  the typed `outcome`; the adapters still classify from `run.failed` records
-  and `final_summary` text.
+  Progress (2026-10-17): the summary, `run.finished`, and a stream hard stop's
+  `run.failed` carry the typed `outcome`. The Pier and Harbor adapters read the
+  run's terminal trace record into `harness_outcome` instead of grepping for
+  `run.failed`, keep `harness_failure` and the batch-stop rules, and now stop
+  the batch on a clean exit without `run.finished`
+  (`benchmarks/cli-migration/structured-outcome-*`). `terminal_outcome.py`
+  classifies from `outcome` first, keeps its text rules for older traces, and
+  is checked against a contract the binary is tested to write. Open: a
+  `run.failed` without an outcome still does not separate provider from
+  environment failure, and the interaction limit is still matched on its
+  error text.
 - [ ] **Prove equivalent resolved runs.** Compare old/new intake and effective
   contracts, model controls, context packets, tool/probe exposure, permissions,
   and stop policies using deterministic fixtures and scripted gateways. Inspect

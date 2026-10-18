@@ -10,6 +10,23 @@ The release workflow publishes each version's section as its GitHub release note
 
 ## [Unreleased]
 
+### Added
+
+- The trace's `run.failed` record carries `outcome` when a hard stop raised
+  inside a model stream ended the run (an inspection loop or a no-content
+  stream), so benchmark adapters classify every run ending from typed
+  fields. It is `null` for provider and environment errors. `TRACE_SCHEMA.md`
+  gains a section on the terminal events. The live benchmark classifier,
+  `benchmarks/terminal_outcome.py`, reads `outcome` from `run.finished` and
+  `run.failed` and falls back to its earlier rules for traces without it. A
+  withheld completion now gets its own `withheld_<gate>` label; the text rules
+  had called it `fail` or `outer_turn_limit`. One contract file,
+  `benchmarks/fixtures/terminal_outcome_contract.json`, lists each outcome and
+  its label: the end-to-end tests check that the binary writes it, and the
+  classifier's tests, now a required gate and a CI step, check the labels.
+  The Pier and Harbor adapters' matching change is recorded as a patch with
+  file hashes in `benchmarks/cli-migration/structured-outcome-*`.
+
 ## [0.5.0] - 2026-10-17
 
 Every run now says how it ended and what it did. The runtime decides a typed

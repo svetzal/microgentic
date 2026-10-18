@@ -60,6 +60,8 @@ jobs:
         run: cargo test --locked --all-targets --all-features
       - name: Collection checks
         run: python3 -m unittest discover -s benchmarks -p 'test_collection_validation.py'
+      - name: Benchmark outcome reader
+        run: python3 -m unittest discover -s benchmarks -p 'test_terminal_outcome.py'
       - name: Build release binaries with source provenance
         env:
           MICROGENTIC_RELEASE_REVISION: ${{ github.sha }}
