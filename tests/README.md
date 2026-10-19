@@ -1,5 +1,27 @@
 # In-process CLI coverage
 
+`src/cli/capped_reasoning.rs` replaces only
+`tests/omlx_gateway.rs::capped_partial_reasoning_is_not_retained_as_completed_native_history`.
+The test parses the compatibility executable's `run --experiment` arguments and
+uses the real dispatcher and public `run_agent` with the existing task-scoped
+`LlmGateway` double. It opens no sockets and starts no subprocess or provider.
+
+| Former evidence | Replacement evidence |
+| --- | --- |
+| SSE reasoning delta containing `PARTIAL_REASONING_SENTINEL`, followed by a DONE reply | Gateway `Thinking` chunk with the identical text, followed by `Content("DONE")`; HTTP decoding is outside this runtime test's boundary. |
+| `--preserve-reasoning --max-thinking-only-tokens 1`, medium effort, 8192 output tokens, three iterations | Identical CLI controls through the dispatcher; summary also confirms reasoning preservation is enabled. |
+| Two HTTP requests, sentinel absent from the second request's messages | Two captured complete gateway requests; sentinel absent from the entire second request, including native history. |
+| Trace retains sentinel and `llm.thinking_only_stream.action_transitioned` | Both trace assertions retained against the actual run trace. |
+| Successful subprocess exit and DONE line | Successful dispatcher exit and exact `DONE` final summary. |
+
+Run `cargo test --locked --lib cli::capped_reasoning`; the required all-targets
+test gate includes it. The acceptance probe rejected the same stream with a cap
+of 8192 because completed reasoning entered the second request, then passed with
+cap 1. This characterizes runtime interruption and history retention, without
+claiming to verify Mojentic's HTTP transport. The remaining `omlx_gateway`
+integration cases still need `mock_server` and `run_cli_options`; both helpers
+remain. No external application contract changed.
+
 `src/cli/run_outcomes.rs` replaces the former `tests/run_outcomes.rs` integration
 suite. All 13 test names are retained under `cli::run_outcomes`. They parse real
 CLI arguments, run the same dispatcher as `cli::run`, call public `run_agent`,

@@ -1610,3 +1610,6 @@ mod everyday_runs;
 
 #[cfg(test)]
 mod benchmark_continuity;
+
+#[cfg(test)]
+mod capped_reasoning;
