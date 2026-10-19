@@ -1,28 +1,7 @@
-//! Benchmark continuity: two binaries given the same provider replies must
-//! send the same provider requests, record the same packets and context
-//! ledgers, and print summaries with the same schema.
-//!
-//! The permanent tests compare the current binary with itself: the legacy
-//! top-level verbs against `benchmark <verb>` with ambient intake (a personal
-//! config, stdin, project guidance and an unused goal) that must change
-//! nothing. To compare against an older binary, build or keep one and run:
-//!
-//! ```text
-//! MICROGENTIC_CONTINUITY_BASELINE=/path/to/old/microgentic \
-//!     cargo test --test benchmark_continuity -- --ignored --nocapture
-//! ```
-//!
-//! `MICROGENTIC_CONTINUITY_MODE=conversation` runs the narrower conversation
-//! isolation check (contract runs through `run --prompt` on both binaries)
-//! instead of the default benchmark mode. `MICROGENTIC_CONTINUITY_CURRENT`
-//! replaces the current side, for example with this build's
-//! `adaptive-agent-harness` to compare it with an older one.
-mod support;
-
+//! Socket-free continuity through the real CLI dispatcher and gateway boundary.
+use super::test_support::*;
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
-use support::*;
 
 const PROMPT: &str = "Inspect the project with list_tree, then finish. Unicode 世界.";
 const SENTINEL: &str = "PROJECT-GUIDANCE-SENTINEL";
@@ -57,9 +36,9 @@ impl Case {
     }
 }
 
-/// An experiment shared by both binaries in one comparison.
+/// One isolated filesystem shared by the CLI dispatch paths being compared.
 struct Experiment {
-    _temp: tempfile::TempDir,
+    workspace: Workspace,
     base: PathBuf,
     root: PathBuf,
     contract: PathBuf,
@@ -68,13 +47,9 @@ struct Experiment {
 
 impl Experiment {
     fn new() -> Self {
-        let temp = tempfile::Builder::new()
-            .prefix("microgentic-continuity-")
-            .tempdir()
-            .expect("temporary directory");
-        let base = temp.path().canonicalize().expect("canonical path");
-        let root = base.join("project");
-        std::fs::create_dir(&root).expect("project directory");
+        let workspace = Workspace::new();
+        let base = workspace.base.clone();
+        let root = workspace.project.clone();
         // Project guidance must never reach benchmark or contract runs.
         std::fs::write(
             root.join("AGENTS.md"),
@@ -94,7 +69,7 @@ impl Experiment {
             .to_string(),
         )
         .expect("contract");
-        let config = base.join("personal-config.json");
+        let config = workspace.config.clone();
         std::fs::write(
             &config,
             "invalid personal config: must never be read by benchmarks",
@@ -104,7 +79,7 @@ impl Experiment {
         std::fs::write(base.join("expected.txt"), "expected artifact\n")
             .expect("expected artifact");
         Self {
-            _temp: temp,
+            workspace,
             base,
             root,
             contract,
@@ -113,7 +88,7 @@ impl Experiment {
     }
 }
 
-/// What one binary sent and recorded for one case.
+/// What one CLI invocation sent and recorded.
 struct Capture {
     requests: Vec<Value>,
     packets: Vec<Value>,
@@ -121,31 +96,21 @@ struct Capture {
     summary: Value,
 }
 
-/// Each odd request inspects the project with one tool call; each even one
-/// finishes. Sequential attempts follow each other without a pause, so
-/// their traces start well within one second in the same directory.
-fn inspect_then_finish(wire: Wire) -> MockProvider {
-    MockProvider::start(wire, move |request| {
-        if request.number % 2 == 1 {
-            Reply::Stream(vec![
-                content("Inspecting."),
-                tool_with_id("inspection", "list_tree", json!({})),
-            ])
-        } else {
-            Reply::Stream(vec![content("DONE")])
-        }
-    })
-}
-
-/// Whether `binary verb --help` lists `flag`.
-fn accepts_flag(binary: &Path, verb: &str, flag: &str) -> bool {
-    let help = std::process::Command::new(binary)
-        .args([verb, "--help"])
-        .output()
-        .expect("asking a binary for help");
-    String::from_utf8_lossy(&help.stdout)
-        .split_whitespace()
-        .any(|word| word.trim_end_matches(',') == flag)
+/// Each attempt inspects with an explicit tool-call ID, then finishes.
+fn inspect_then_finish(wire: Wire) -> ScriptedGateway {
+    let inspection = vec![
+        content("Inspecting."),
+        tool_with_id("inspection", "list_tree", json!({})),
+    ];
+    ScriptedGateway::turns(
+        wire,
+        vec![
+            inspection.clone(),
+            vec![content("DONE")],
+            inspection,
+            vec![content("DONE")],
+        ],
+    )
 }
 
 fn path(path: &Path) -> String {
@@ -158,7 +123,7 @@ fn capture(
     case: Case,
     wire: Wire,
     side: &str,
-    binary: &Path,
+    binary: &str,
 ) -> Capture {
     let provider = inspect_then_finish(wire);
     let trace_dir = experiment
@@ -205,13 +170,10 @@ fn capture(
             .map(str::to_owned),
         );
     }
-    let mut env = provider.env();
     let current = side == "current";
     let mut stdin: &[u8] = b"";
     let args: Vec<String> = match mode {
         Mode::Benchmark => {
-            env.push(("XDG_CONFIG_HOME", path(&experiment.base.join("config"))));
-            env.push(("XDG_STATE_HOME", path(&experiment.base.join("state"))));
             if current {
                 // Both historical file inputs may be supplied; the contract wins.
                 if case != Case::Goal {
@@ -230,10 +192,7 @@ fn capture(
             } else {
                 let mut args = vec![verb.to_owned()];
                 args.extend(controls);
-                // Binaries from before `--json` print JSON without being asked.
-                if accepts_flag(binary, verb, "--json") {
-                    args.push("--json".into());
-                }
+                args.push("--json".into());
                 args
             }
         }
@@ -245,27 +204,19 @@ fn capture(
         }
     };
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
-    let output = run_binary(
-        binary.to_str().expect("binary path"),
-        &args,
-        &experiment.root,
-        &env,
-        stdin,
+    let output = execute_input(binary, &args, &provider, &experiment.workspace, stdin);
+    assert!(
+        provider.metadata_models().is_empty(),
+        "isolated runs must not discover windows"
     );
     let label = format!("{} {} {side}", case.name(), wire.name());
-    assert!(
-        output.status.success(),
-        "{label}: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let summary: Value = serde_json::from_slice(&output.stdout)
+    assert!(output.status.success(), "{label}: {}", stderr(&output));
+    let summary: Value = serde_json::from_str(&stdout(&output))
         .unwrap_or_else(|error| panic!("{label}: the summary is not JSON: {error}"));
-    if mode == Mode::Benchmark {
-        assert!(
-            !experiment.base.join("state").exists(),
-            "{label}: benchmark created personal run state"
-        );
-    }
+    assert!(
+        !experiment.workspace.state.exists(),
+        "{label}: isolated run created personal state"
+    );
     let trace_files: Vec<PathBuf> = if case == Case::Sequential {
         summary["attempts"]
             .as_array()
@@ -325,6 +276,16 @@ fn capture(
         case.expected_requests(),
         "{label}: requests"
     );
+    assert_eq!(
+        requests[1]["messages"][2]["tool_calls"][0]["id"],
+        "inspection"
+    );
+    assert_eq!(requests[1]["messages"][3]["role"], "tool");
+    assert_eq!(
+        requests[1]["messages"][3]["tool_calls"][0]["id"],
+        "inspection"
+    );
+    assert_fixed_evidence(case, wire, &requests, &packets, &ledgers, &summary);
     assert_eq!(packets.len(), case.expected_requests(), "{label}: packets");
     if case == Case::Sequential {
         assert_eq!(
@@ -348,7 +309,7 @@ fn capture(
 }
 
 /// Run one case on both binaries, assert continuity, and describe the result.
-fn compare(baseline: &Path, current: &Path, mode: Mode, case: Case, wire: Wire) -> Value {
+fn compare(baseline: &str, current: &str, mode: Mode, case: Case, wire: Wire) {
     let experiment = Experiment::new();
     let old = capture(&experiment, mode, case, wire, "baseline", baseline);
     let new = capture(&experiment, mode, case, wire, "current", current);
@@ -362,40 +323,6 @@ fn compare(baseline: &Path, current: &Path, mode: Mode, case: Case, wire: Wire) 
         "{label}: provider packets changed"
     );
     assert_eq!(old.ledgers, new.ledgers, "{label}: context ledgers changed");
-    let keys = |summary: &Value| -> Vec<String> {
-        let mut keys: Vec<String> = summary
-            .as_object()
-            .expect("summary object")
-            .keys()
-            .cloned()
-            .collect();
-        keys.sort();
-        keys
-    };
-    // The summary schema may only grow, and only by the documented additive
-    // fields; every historical key stays.
-    let (old_keys, new_keys) = (keys(&old.summary), keys(&new.summary));
-    let removed: Vec<&String> = old_keys
-        .iter()
-        .filter(|key| !new_keys.contains(key))
-        .collect();
-    assert!(
-        removed.is_empty(),
-        "{label}: summary keys removed: {removed:?}"
-    );
-    let added: Vec<String> = new_keys
-        .iter()
-        .filter(|key| !old_keys.contains(key))
-        .cloned()
-        .collect();
-    let unexpected: Vec<&String> = added
-        .iter()
-        .filter(|key| !ADDITIVE_SUMMARY_KEYS.contains(&key.as_str()))
-        .collect();
-    assert!(
-        unexpected.is_empty(),
-        "{label}: undocumented new summary keys: {unexpected:?}"
-    );
     if case == Case::Sequential {
         let attempts =
             |summary: &Value| summary["attempts"].as_array().cloned().unwrap_or_default();
@@ -423,30 +350,102 @@ fn compare(baseline: &Path, current: &Path, mode: Mode, case: Case, wire: Wire) 
             "{label}: final summary changed"
         );
     }
-    json!({
-        "case": case.name(),
-        "provider": wire.name(),
-        "requests_compared": case.expected_requests(),
-        "provider_json_equal": true,
-        "exact_snapshots_equal": true,
-        "context_ledgers_equal": true,
-        "summary_schema_equal": added.is_empty(),
-        "summary_schema_additive_keys": added,
-    })
 }
 
-/// Summary fields added since the first public release, each documented as
-/// additive: `outcome` (added after 0.4.0) says how the run ended; `changes`
-/// and `checks` (added after 0.4.0) say what the run changed and checked.
+/// Summary additions since 0.4.0 are optional for historical readers.
 const ADDITIVE_SUMMARY_KEYS: &[&str] = &["outcome", "changes", "checks"];
 
-fn current_binary() -> PathBuf {
-    PathBuf::from(microgentic())
+/// Fixed expectations are independent of the two dispatch paths. No IDs, text,
+/// paths, descriptors or completion controls are masked. The fixture factors
+/// shared descriptors/controls once and expands them to complete gateway inputs.
+fn assert_fixed_evidence(
+    case: Case,
+    wire: Wire,
+    requests: &[Value],
+    packets: &[Value],
+    ledgers: &[Value],
+    summary: &Value,
+) {
+    let expected: Value = serde_json::from_str(include_str!(
+        "../../tests/fixtures/benchmark_continuity.json"
+    ))
+    .unwrap();
+    assert_eq!(
+        expected["schema_version"],
+        "microgentic_benchmark_continuity.v1"
+    );
+    let profile = if case == Case::Goal {
+        "goal"
+    } else {
+        "contract"
+    };
+    let model = &expected["models"][wire.name()];
+    let mut expected_requests = Vec::new();
+    let mut expected_packets = Vec::new();
+    let mut expected_ledgers = Vec::new();
+    for i in 0..case.expected_requests() {
+        let messages = &expected["messages"][profile][i % 2];
+        let mut request = expected["request_controls"].clone();
+        request["messages"] = messages.clone();
+        request["model"] = model.clone();
+        request["tools"] = expected["tools"].clone();
+        expected_requests.push(request);
+
+        let mut packet = expected["packet_controls"][wire.name()][i % 2].clone();
+        packet["messages"] = messages.clone();
+        packet["model"] = model.clone();
+        packet["tools"] = expected["tools"].clone();
+        expected_packets.push(packet);
+
+        let mut ledger = expected["ledgers"][profile][i % 2].clone();
+        ledger["model"] = model.clone();
+        expected_ledgers.push(ledger);
+    }
+    assert_eq!(requests, expected_requests, "complete gateway requests");
+    assert_eq!(packets, expected_packets, "complete assembled packets");
+    assert_eq!(ledgers, expected_ledgers, "complete context ledgers");
+
+    let key = if case == Case::Sequential {
+        "sequential_summary_keys"
+    } else {
+        "summary_keys"
+    };
+    let required: Vec<&str> = expected[key]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    for key in &required {
+        assert!(summary.get(key).is_some(), "removed summary field {key}");
+    }
+    for key in summary.as_object().unwrap().keys() {
+        assert!(
+            required.contains(&key.as_str())
+                || (case != Case::Sequential && ADDITIVE_SUMMARY_KEYS.contains(&key.as_str())),
+            "undocumented summary field {key}"
+        );
+    }
+    if case == Case::Sequential {
+        let attempts = summary["attempts"].as_array().unwrap();
+        assert_eq!(attempts.len(), 2);
+        for (i, attempt) in attempts.iter().enumerate() {
+            // Every deterministic attempt field has a fixed value. Trace paths
+            // are checked for distinctness above; elapsed time is not asserted.
+            let mut fields = attempt.as_object().unwrap().clone();
+            assert!(fields.remove("trace_file").is_some());
+            assert!(fields.remove("runtime_seconds").is_some());
+            assert_eq!(Value::Object(fields), expected["attempts"][i]);
+        }
+    } else {
+        assert_eq!(summary["final_summary"], "Inspecting.\nDONE");
+    }
 }
 
 fn self_check(case: Case, wire: Wire) {
-    let binary = current_binary();
-    compare(&binary, &binary, Mode::Benchmark, case, wire);
+    // Preserve top-level run dispatch as well as the compatibility executable.
+    compare(microgentic(), microgentic(), Mode::Benchmark, case, wire);
+    compare(legacy_binary(), microgentic(), Mode::Benchmark, case, wire);
 }
 
 #[test]
@@ -479,54 +478,15 @@ fn benchmark_packets_match_task_runs_and_ignore_ambient_intake_sequential_ollama
     self_check(Case::Sequential, Wire::Ollama);
 }
 
-fn sha256(path: &Path) -> String {
-    let bytes = std::fs::read(path).expect("reading a binary");
-    Sha256::digest(bytes)
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
-}
-
-/// Compare an older binary named by `MICROGENTIC_CONTINUITY_BASELINE` with
-/// the current one, and print a report with both binaries' hashes.
 #[test]
-#[ignore = "needs MICROGENTIC_CONTINUITY_BASELINE, the path of an older binary"]
-fn continuity_against_a_baseline_binary() {
-    let baseline = std::env::var_os("MICROGENTIC_CONTINUITY_BASELINE")
-        .map(PathBuf::from)
-        .expect("set MICROGENTIC_CONTINUITY_BASELINE to the path of an older microgentic binary");
-    let baseline = baseline
-        .canonicalize()
-        .unwrap_or_else(|error| panic!("{}: {error}", baseline.display()));
-    let mode = match std::env::var("MICROGENTIC_CONTINUITY_MODE").as_deref() {
-        Ok("benchmark") | Err(_) => Mode::Benchmark,
-        Ok("conversation") => Mode::Conversation,
-        Ok(other) => {
-            panic!("MICROGENTIC_CONTINUITY_MODE must be benchmark or conversation, not {other}")
-        }
-    };
-    let current = std::env::var_os("MICROGENTIC_CONTINUITY_CURRENT")
-        .map_or_else(current_binary, PathBuf::from)
-        .canonicalize()
-        .expect("current binary");
-    let cases: &[Case] = match mode {
-        Mode::Benchmark => &[Case::Contract, Case::Goal, Case::Sequential],
-        Mode::Conversation => &[Case::Contract],
-    };
-    let mut results = Vec::new();
-    for &case in cases {
-        for wire in [Wire::Omlx, Wire::Ollama] {
-            results.push(compare(&baseline, &current, mode, case, wire));
-        }
+fn contract_conversation_isolation_both_providers() {
+    for wire in [Wire::Omlx, Wire::Ollama] {
+        compare(
+            legacy_binary(),
+            microgentic(),
+            Mode::Conversation,
+            Case::Contract,
+            wire,
+        );
     }
-    let report = json!({
-        "schema_version": match mode {
-            Mode::Benchmark => "microgentic_benchmark_mode_check.v1",
-            Mode::Conversation => "microgentic_conversation_isolation_check.v1",
-        },
-        "baseline_sha256": sha256(&baseline),
-        "current_sha256": sha256(&current),
-        "results": results,
-    });
-    println!("{}", serde_json::to_string_pretty(&report).expect("report"));
 }

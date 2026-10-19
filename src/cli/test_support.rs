@@ -70,8 +70,11 @@ pub(super) fn content(text: &str) -> StreamChunk {
     StreamChunk::Content(text.into())
 }
 pub(super) fn tool(name: &str, arguments: Value) -> StreamChunk {
+    tool_with_id(&format!("call-{name}"), name, arguments)
+}
+pub(super) fn tool_with_id(id: &str, name: &str, arguments: Value) -> StreamChunk {
     StreamChunk::ToolCalls(vec![LlmToolCall {
-        id: Some(format!("call-{name}")),
+        id: Some(id.into()),
         name: name.into(),
         arguments: serde_json::from_value(arguments).unwrap(),
     }])
@@ -142,6 +145,13 @@ pub(super) fn execute_input(
         requests: Mutex::new(Vec::new()),
         metadata_models: Mutex::new(Vec::new()),
     });
+    let sequential = matches!(
+        &cli.command,
+        Some(Command::RunSequential(_))
+            | Some(Command::Benchmark {
+                command: BenchmarkCommand::RunSequential(_)
+            })
+    );
     let everyday = binary != legacy_binary()
         && matches!(&cli.command, Some(Command::Run(run)) if run.experiment.is_none() && run.contract.is_none());
     let code = runtime
@@ -170,7 +180,9 @@ pub(super) fn execute_input(
         .lock()
         .unwrap()
         .extend(io.metadata_models.lock().unwrap().iter().cloned());
-    if let Ok(summary) = serde_json::from_slice::<Value>(&stdout) {
+    if let Ok(summary) = serde_json::from_slice::<Value>(&stdout)
+        && !sequential
+    {
         assert_eq!(summary["provider"], provider.wire.name());
     }
     Output {

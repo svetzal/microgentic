@@ -1022,7 +1022,10 @@ async fn dispatch_cli(
                     max_consecutive_unchanged_attempts: args.max_consecutive_unchanged_attempts,
                 })
                 .await?;
+                #[cfg(not(test))]
                 println!("{}", serde_json::to_string_pretty(&summary)?);
+                #[cfg(test)]
+                writeln!(stdout, "{}", serde_json::to_string_pretty(&summary)?)?;
             }
         },
         Command::RunSequential(args) => {
@@ -1035,7 +1038,10 @@ async fn dispatch_cli(
                 max_consecutive_unchanged_attempts: args.max_consecutive_unchanged_attempts,
             })
             .await?;
+            #[cfg(not(test))]
             println!("{}", serde_json::to_string_pretty(&summary)?);
+            #[cfg(test)]
+            writeln!(stdout, "{}", serde_json::to_string_pretty(&summary)?)?;
         }
         Command::AnalyzeTrace { traces } => {
             let summaries = traces
@@ -1601,3 +1607,6 @@ mod run_report;
 
 #[cfg(test)]
 mod everyday_runs;
+
+#[cfg(test)]
+mod benchmark_continuity;

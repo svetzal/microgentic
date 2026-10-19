@@ -131,8 +131,62 @@ public API changes. The existing executable outcome contract remains
 Both the Rust producer suite and Python consumer suite verify it in this
 repository's required gates. No external provider verification is claimed.
 
-Remaining campaign work: `tui`, `termination`, and `benchmark_continuity` still
-use `tests/support/provider.rs`. Their server support and coverage remain in
-place. Benchmark request-continuity assertions, registered Python recovery/progress
-harnesses and experiment inputs are unchanged. This migration does not claim
-those suites have become in-process tests.
+Remaining campaign work: `tui` and `termination` still use
+`tests/support/provider.rs`; their shared server support remains. Registered
+Python recovery/progress harnesses and experiment inputs are unchanged.
+
+## Benchmark continuity
+
+`src/cli/benchmark_continuity.rs` replaces `tests/benchmark_continuity.rs`.
+All six permanent test names are retained under `cli::benchmark_continuity`.
+Each provider (oMLX and Ollama) runs contract, goal, and sequential cases through
+real argument parsing and CLI dispatch into public `run_agent`/`run_sequential`.
+Both the normal executable's historical top-level verbs and the compatibility
+executable are compared with `benchmark run` or `benchmark run-sequential`.
+No socket, server, child binary, Python harness, sleep, process environment/cwd
+mutation or wall-clock assertion is used by this suite.
+
+The original cases and ignored comparison were characterized before migration:
+
+| Original assertion / guarantee | Executable replacement |
+| --- | --- |
+| Contract/goal/sequential × two providers (six permanent tests): full HTTP JSON equality between legacy and benchmark commands | Same named cases compare **complete actual gateway inputs**, independently captured by `OutcomeIo::complete_stream`, across both dispatch paths and the compatibility executable. Each input also equals a fixed expectation, including exact Unicode messages, `inspection` assistant and tool-result IDs, arguments, descriptors, provider default model, and every completion control. |
+| Full assembled packets and context ledgers equal | Complete values equal across dispatches **and** fixed expectations for each case/provider/call; packet content is checked separately from captured gateway requests. |
+| Ambient invalid personal config, nonempty stdin, project AGENTS.md, and nonexistent unused goal must not affect benchmark requests | Actual CLI receives each input; the contract wins over the unused goal. Invalid config cannot be loaded successfully. Complete fixed requests exclude ambient input and project guidance (the list_tree result still legitimately lists AGENTS.md). No personal state directory exists. |
+| No session events, discovered-window/residency trace events, or residency/known_window ledger fields | Same trace/ledger exclusions, fixed full ledgers, and zero captured metadata-discovery calls. |
+| Sequential attempts share a trace directory but never a trace file | Exact path distinctness and common parent, without timing assumptions. Each real trace is read. |
+| Sequential fresh context: first two requests equal the next two | Same whole-request assertion plus four fixed request/packet/ledger expectations; the second attempt restarts with the initial messages and no earlier assistant/tool history. |
+| Summary keys cannot shrink; only outcome/changes/checks may be added | Fixed required legacy summary keys, allowing only those three additive keys; sequential summary keys are independently fixed. Final text is exactly `Inspecting.\nDONE`. |
+| Sequential final_summary, accepted_done, independent_exact, terminal_error, pre/post artifact, artifact_unchanged agree; stop reason and confirmed success fixed | Original comparisons retained. Fixed expectations additionally check every deterministic attempt field: ordinal, unchanged streak, repair counters, probes, explicit failure, observed tokens and outcome. Runtime values are not asserted; trace files are verified separately. |
+| Ignored historical comparison's benchmark mode: all six cases, request/packet/ledger equality, additive summary compatibility, attempt fields | Permanent cases plus fixed expectations retain these Microgentic guarantees at the gateway boundary. Arbitrary old executables are no longer run or claimed verified. |
+| Ignored historical comparison's conversation mode: contract `run --prompt` isolation for both providers | Now permanent `contract_conversation_isolation_both_providers`, with full fixed request/packet/ledger assertions, metadata/state/trace exclusions and compatibility-executable dispatch. This is task isolation when a contract/experiment is supplied, not an everyday conversation session. |
+| Old driver probes --help for --json, selects binaries via CONTINUITY_* variables and prints binary SHA-256/report schema | Retired with the historical driver. These identify external executable comparisons, not runtime compatibility behavior; there is no replacement historical-binary report or claim of verifying an unavailable old revision. |
+| Provider-specific HTTP serialization, SSE/NDJSON stream parsing and encoding of tool IDs | Transport-only coverage retired from this suite. Actual normalized LlmGateway messages, IDs, descriptors and completion controls are retained exactly. Mojentic owns HTTP serialization/parsing; no external Mojentic verification is claimed. TUI/termination still retain their existing server. |
+
+Fixed expectations live in `tests/fixtures/benchmark_continuity.json`, version
+`microgentic_benchmark_continuity.v1`, SHA-256
+`510915b0d21f86f7263ff5c29399f6a0fd358fb00ac72af2ce5771df96eb31af`.
+Shared descriptors and completion controls
+are stored once and expanded into complete requests; contract and goal messages
+are literal, provider model names and packet controls are explicit. No value is
+masked or dynamically copied from a captured request. Sequential expectations
+repeat the contract's two exact inputs. The fixture was checked against every
+case/provider capture through the dispatcher; traces never substitute for
+requests observed at the gateway. Update expectations only after reviewing the
+entire behavior change, not by automatically accepting a new capture.
+
+Run `cargo test --locked --lib cli::benchmark_continuity`; it is included in
+`cargo test --locked --all-targets --all-features`, the repository's required gate.
+The acceptance probe first rejected a helper replacing `inspection` with
+`call-list_tree`, then passed with the explicit ID preserved. Existing callers
+of `tool()` retain their `call-{name}` IDs. Only the unused server-side
+`last_tool_result` and `tool_names` definitions were removed; their live
+replacements remain in `src/cli/everyday_runs.rs`.
+
+The module registration and driver are `cfg(test)`, as is `OutcomeIo` in
+`src/lib.rs`. Sequential stdout capture and retry worker-root injection also use
+`cfg(test)`; release builds keep the original println and cwd path. No runtime,
+dependency, edition, MSRV, feature or public API behavior changes are introduced.
+This fixture is an internal regression specification, not a changed contract
+between repositories. The existing terminal-outcome contract and its Rust/Python
+producer/consumer verification remain unchanged and run in the required gates.
