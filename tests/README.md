@@ -17,8 +17,8 @@ Characterization of every case remaining before this migration:
 | Original `tests/omlx_gateway.rs` case | Preserved assertions and replacement evidence | Transport-only assertions retired |
 | --- | --- | --- |
 | `microgentic_and_legacy_entry_points_preserve_exact_provider_requests` | `modern_and_legacy_contract_requests_are_complete_and_equal`: both providers, malformed personal config ignored, Unicode guidance, explicit workspace, DONE, modern/legacy token and interaction aliases. Both complete requests match independent expectations, including literal `inspect-1` on assistant and tool result, then match across dispatch paths. Existing `benchmark_continuity` also fixes complete requests, packets and ledgers for contract/goal/sequential modes. | Executable startup and HTTP route/auth/framing; no claim of testing an old external executable. |
-| `saved_defaults_and_stdin_prompt_reach_the_public_worker_without_stdout_noise` | `saved_setup_and_unicode_stdin_keep_stdout_and_workspace_clean`: real setup persists provider/model/effort, piped multiline Unicode prompt equals explicit prompt and flags across complete gateway inputs, exact plain stdout, fixed completion controls, no management files in workspace, both providers. | OS stdin pipe plumbing and HTTP metadata/chat exchange. Intake is task-scoped at the I/O boundary. |
-| `built_worker_preserves_entry_stash_and_rejects_new_stash_both_providers` | `entry_stash_is_preserved_and_new_stash_rejects_done_both_providers`: real Git inventory and shell tool, entry inventory in gateway input, original object IDs survive unchanged, new stash forces repair input and FAIL, exact `stash-tool` IDs and rejection trace, both providers. Existing `run_outcomes` separately fixes withheld-stash outcome/exit policy. | Provider encoding of the shell tool response. |
+| `saved_defaults_and_stdin_prompt_reach_the_public_worker_without_stdout_noise` | `saved_setup_and_unicode_stdin_keep_stdout_and_workspace_clean`: real setup persists provider/model/effort; saved-default/stdin and explicit-argument runs each independently match a complete expected request, including literal conversational system guidance, multiline Unicode input, all descriptors (including calculate), model, controls and optional-field presence/absence. Exact plain stdout, metadata model, two traces and empty workspace remain checked for both providers. | OS stdin pipe plumbing and HTTP metadata/chat exchange. Intake is task-scoped at the I/O boundary. |
+| `built_worker_preserves_entry_stash_and_rejects_new_stash_both_providers` | `entry_stash_is_preserved_and_new_stash_rejects_done_both_providers`: real dispatcher, Git inventory and shell tool; complete expected sequences for the preserved-entry case (one request) and new-stash case (initial, tool continuation, repair). Exact entry inventory, literal `stash-tool` IDs in assistant and tool messages, full serialized shell result, DONE history and repair text are specified independently. Original object IDs, final summary and rejection trace remain checked for both providers. Existing `run_outcomes` separately fixes withheld-stash outcome/exit policy. | Provider encoding of the shell tool response. |
 | `worker_effort_and_token_budgets_reach_omlx_on_the_wire` | `worker_efforts_and_both_token_flags_reach_the_gateway`: absent, disabled, low, medium, high, xhigh and enabled effort; both output-token aliases; exact complete requests including every completion control and descriptor, model, temperature and context. Trace packets separately fix provider-control mappings and exclude `test-key`. | HTTP `stream`, oMLX field placement and omission of Ollama fields; Mojentic owns those translations. |
 | `omlx_tool_results_survive_but_native_reasoning_is_only_traced` | `literal_ids_and_reasoning_survive_tools_and_outer_turns`: literal `inspect-1`, exact tool result, reasoning absent by default from complete subsequent requests and retained in trace. Covers both token aliases in the controls test. | SSE parsing and wire `tool_call_id` spelling. Normalized gateway messages carry the literal ID in `tool_calls`. |
 | `ollama_named_efforts_reach_the_wire_without_collapsing` | Direct Mojentic-only test deleted under the mission instruction. The worker effort test independently retains Microgentic's exact named/boolean/absent effort choices for both providers at its gateway boundary. | Entire direct `OllamaGateway::complete` HTTP test: no Microgentic behavior exercised. No fake is claimed to verify Mojentic's HTTP implementation. |
@@ -32,12 +32,20 @@ The already landed `cli::capped_reasoning` coverage below remains unchanged.
 Expected messages and tool descriptors reuse
 `tests/fixtures/benchmark_continuity.json` (`microgentic_benchmark_continuity.v1`,
 SHA-256 `510915b0d21f86f7263ff5c29399f6a0fd358fb00ac72af2ce5771df96eb31af`).
-Additional expected IDs, empty-tree results, continuation text, controls and
-optional native reasoning fields are literal test inputs; expectations are never
-copied from captures or masked. Complete gateway requests, rather than trace
+Additional expected IDs, empty-tree and shell results, continuation/repair text,
+controls and optional native reasoning fields are literal test inputs. Everyday
+system guidance and the additional calculate descriptor are literal specifications
+in `gateway_requests.rs`, independent of production builders. Stash expectations
+derive only repository paths and object IDs from separate Git queries; they never
+use runtime inventory/message builders or captured requests. Expectations are
+never copied from captures or masked. Complete gateway requests, rather than trace
 snapshots, establish request behavior. Traces additionally establish observability
-and context accounting. The sensitivity probe rejects a wrong literal assistant
-ID and passes with `inspect-1` restored.
+and context accounting. Sensitivity probes reject independently introduced
+conversational system-message and calculate-descriptor regressions, a changed
+scripted stash-tool ID, and separate corruption of assistant and tool stash IDs.
+Restoring each input or
+implementation passes the focused suite. This proves request-oracle sensitivity
+at the in-process gateway boundary; it does not verify HTTP encoding.
 
 Focused verification: `cargo test --locked --lib cli::gateway_requests`,
 `cargo test --locked --lib semantic_advisory::tests`,
