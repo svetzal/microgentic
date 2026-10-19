@@ -1616,3 +1616,6 @@ mod capped_reasoning;
 
 #[cfg(test)]
 mod gateway_requests;
+
+#[cfg(test)]
+mod recovery_prerequisites;

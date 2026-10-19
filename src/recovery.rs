@@ -138,7 +138,17 @@ impl RecoverySettings {
     }
 }
 
+// Credential-source injection for in-process CLI tests; absent from every binary.
+#[cfg(test)]
+tokio::task_local! {
+    pub(crate) static TEST_CREDENTIALS: Vec<String>;
+}
+
 pub(crate) fn credentials() -> Vec<String> {
+    #[cfg(test)]
+    if let Ok(credentials) = TEST_CREDENTIALS.try_with(Clone::clone) {
+        return credentials;
+    }
     ["OMLX_API_KEY", "OPENAI_API_KEY", "OLLAMA_API_KEY"]
         .into_iter()
         .filter_map(|key| std::env::var(key).ok())

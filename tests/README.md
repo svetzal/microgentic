@@ -1,5 +1,47 @@
 # CLI and terminal coverage
 
+## Recovery prerequisite characterization
+
+This inventory was made before replacing `tests/recovery_prerequisites.rs`.
+The replacement lives in `src/cli/recovery_prerequisites.rs` under `cfg(test)`.
+
+| Original evidence | Disposition |
+| --- | --- |
+| `reviewed_recovery_stream_preserves_worker_frame_progress`: clean child environment; HTTP POST route, body length and framing; three identical encoded requests | Retire provider-owned transport diagnostics under Stacey's 2026-10-18 removal of real-connection tests. |
+| Legacy stream: four progress frames, initial zero content/thinking/tools and not done; one metrics frame with eval count 7 and 7 tokens/s | Preserve Microgentic's consumption of independently specified progress and metrics through the CLI gateway replacement. |
+| Raw recovery: stable identity and wire attempt 1 on progress/metrics/completion; exact reasoning and DONE; no tools or failure; raw byte count; terminal usage 7/11 and eval duration 1,000,000,000 ns; ordered progress/progress/reasoning/progress/content/progress/metrics/completed | Identity, raw byte accounting, terminal evidence and recovery event translation belong to Mojentic and are retired here. Preserve native reasoning, DONE and ordered Microgentic telemetry at the normalized gateway boundary. |
+| Raw and convenience progress/metrics equal legacy after discarding client timing; persisted response/request bodies and assertions identifying reviewed revision | Retire cross-adapter comparisons and diagnostic artifacts. A scripted gateway does not verify Mojentic, recovery conformance, HTTP encoding or stream decoding. |
+| `actual_worker_provider_paths_preserve_progress_prerequisites`: Python subprocess succeeds; both provider cases complete | Replace with separate Ollama and oMLX cases through the production CLI parser/dispatcher and public agent API. |
+| Python handler: expected route, oMLX Bearer credential, no handler failures; subprocess exit 0; exactly one request; DONE summary; exactly one trace | Preserve dispatcher success, complete single gateway request, DONE and single trace. Route/authentication and process/environment plumbing are provider/OS diagnostics, retired. |
+| Python artifact loop: secret absent from stdout, stderr, trace, response and every request | Preserve absence from captured stdout/stderr, trace, gateway input and scripted response artifacts. No HTTP headers or environment are serialized by the replacement. |
+| Python reasoning/tools/controls: native thinking event, stream true, nonempty tools, interaction limit 1; Ollama think true and num_predict 8192; oMLX max_tokens 8192, enable_thinking true, preserve_thinking true | Preserve native reasoning, limit and actual interaction count 1, complete tool descriptors and completion controls; verify Microgentic's provider-control trace. HTTP stream and field encoding remain Mojentic-owned. |
+| Python Ollama telemetry: four progress payloads, first content/thinking/tools all zero; one metrics payload, eval 7, prompt 11, throughput 7.0 | Preserve full ordered progress payloads and provider metrics with independent literal expectations, including durations and optional fields. |
+| Python response/request/stdout/stderr/assertion files and worker executable SHA-256 | Use temporary CLI artifacts and Rust assertions; no frozen binary provenance claim. Registered Python harness and its inputs remain unchanged. |
+
+The separate `tests/recovery_worker.rs` invocation of `worker_conformance.py`
+remains outside this migration. No application/repository boundary changes;
+provider verification is not supplied by these consumer-side tests.
+
+Replacement evidence (`cargo test --locked --lib cli::recovery_prerequisites`):
+
+| Replacement case | Independently specified evidence |
+| --- | --- |
+| `ollama_baseline_preserves_ordered_progress_and_metrics` | One complete request for `synthetic-model`, all tool descriptors, literal system/user messages for `Finish with DONE.`, temperature 1.0, context 32768, output limit 8192, enabled reasoning, preserved reasoning, interaction limit 1; every other completion option specified. One actual interaction and one trace, final summary DONE. Provider controls: `think: true`, `num_predict: 8192`, `num_ctx: 32768`. |
+| Same Ollama case, ordered telemetry | Progress frames 1–4: `(content_chars, thinking_chars, done)` = `(0,0,false)`, `(0,20,false)`, `(4,0,false)`, `(0,0,true)`; both tool counts zero throughout. States WaitingForFirstToken, Generating, Generating, DoneFrame; cumulative and per-call frame counts 1–4. Event order: progress, progress, thinking, progress, content (`agent.stream.chunk`), progress, metrics. Native reasoning preview is `Synthetic reasoning.` (20 chars). |
+| Same Ollama case, metrics and throughput | Exact metrics payload: prompt count 11, eval count 7, total/load/prompt/eval durations 2,000,000,000 / 100,000,000 / 400,000,000 / 1,000,000,000 ns, throughput 7.0; turn 1, depth 0, thinking 20, packet multi-file-edit, expected output 4096, context band unknown. The throughput trace and single persisted sample retain independently expected provider/model/count/duration/budget values. Timestamp and host identity are not fixed; persisted sample must equal its trace record. |
+| `omlx_baseline_preserves_native_reasoning_and_controls` | Same complete request, DONE, one interaction/trace and native reasoning; provider controls `max_tokens: 8192`, `enable_thinking: true`, absent named effort (`null`), `chat_template_kwargs: {preserve_thinking: true}`. Thinking precedes content; no progress/metrics fabricated for this provider and no throughput file. |
+| Both cases, credential boundary | A task-scoped credential source supplies a private canary without process environment mutation. Stdout, stderr, trace, scripted response and complete captured request exclude it. The seam and both cases are `cfg(test)` only. This proves credential-free Microgentic artifacts at this boundary, not HTTP authentication. |
+
+The complete messages and descriptors reuse the existing versioned
+`tests/fixtures/benchmark_continuity.json` request specification
+(`microgentic_benchmark_continuity.v1`), without changing that fixture or its
+expectations. Provider-control trace version is `provider_request.v1`.
+The gateway replies are consumer inputs, not provider-verified contracts.
+There is no changed external boundary and no new paired contract verification
+claim. In particular, raw/convenience recovery identity, byte accounting,
+terminal evidence, wire optional fields and legacy equivalence remain unverified
+by this suite. The registered conformance matrix is unchanged.
+
 ## Gateway request migration
 
 `src/cli/gateway_requests.rs` drives the real argument parser, dispatcher and

@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 const PROMPT: &str = "Inspect the project with list_tree, then finish. Unicode 世界.";
 
 // Reuse the reviewed, versioned continuity specification, never a capture.
-fn expected_request(wire: Wire, effort: &str, preserve: bool, messages: Value) -> Value {
+pub(super) fn expected_request(wire: Wire, effort: &str, preserve: bool, messages: Value) -> Value {
     let fixture: Value = serde_json::from_str(include_str!(
         "../../tests/fixtures/benchmark_continuity.json"
     ))
@@ -20,7 +20,7 @@ fn expected_request(wire: Wire, effort: &str, preserve: bool, messages: Value) -
     })
 }
 
-fn initial_messages() -> Value {
+pub(super) fn initial_messages() -> Value {
     let fixture: Value = serde_json::from_str(include_str!(
         "../../tests/fixtures/benchmark_continuity.json"
     ))
