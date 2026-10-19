@@ -220,8 +220,8 @@ public API changes. The existing executable outcome contract remains
 Both the Rust producer suite and Python consumer suite verify it in this
 repository's required gates. No external provider verification is claimed.
 
-Remaining campaign work: `tui` and `termination` still use
-`tests/support/provider.rs`; their shared server support remains. Registered
+Remaining campaign work: `tui` still uses `tests/support/provider.rs` and
+`tests/support/terminal.rs`; their shared server and terminal support remains. Registered
 Python recovery/progress harnesses and experiment inputs are unchanged.
 
 ## Benchmark continuity
@@ -250,7 +250,7 @@ The original cases and ignored comparison were characterized before migration:
 | Ignored historical comparison's benchmark mode: all six cases, request/packet/ledger equality, additive summary compatibility, attempt fields | Permanent cases plus fixed expectations retain these Microgentic guarantees at the gateway boundary. Arbitrary old executables are no longer run or claimed verified. |
 | Ignored historical comparison's conversation mode: contract `run --prompt` isolation for both providers | Now permanent `contract_conversation_isolation_both_providers`, with full fixed request/packet/ledger assertions, metadata/state/trace exclusions and compatibility-executable dispatch. This is task isolation when a contract/experiment is supplied, not an everyday conversation session. |
 | Old driver probes --help for --json, selects binaries via CONTINUITY_* variables and prints binary SHA-256/report schema | Retired with the historical driver. These identify external executable comparisons, not runtime compatibility behavior; there is no replacement historical-binary report or claim of verifying an unavailable old revision. |
-| Provider-specific HTTP serialization, SSE/NDJSON stream parsing and encoding of tool IDs | Transport-only coverage retired from this suite. Actual normalized LlmGateway messages, IDs, descriptors and completion controls are retained exactly. Mojentic owns HTTP serialization/parsing; no external Mojentic verification is claimed. TUI/termination still retain their existing server. |
+| Provider-specific HTTP serialization, SSE/NDJSON stream parsing and encoding of tool IDs | Transport-only coverage retired from this suite. Actual normalized LlmGateway messages, IDs, descriptors and completion controls are retained exactly. Mojentic owns HTTP serialization/parsing; no external Mojentic verification is claimed. TUI still retains its existing server; termination uses the scripted gateway below. |
 
 Fixed expectations live in `tests/fixtures/benchmark_continuity.json`, version
 `microgentic_benchmark_continuity.v1`, SHA-256
@@ -279,3 +279,58 @@ dependency, edition, MSRV, feature or public API behavior changes are introduced
 This fixture is an internal regression specification, not a changed contract
 between repositories. The existing terminal-outcome contract and its Rust/Python
 producer/consumer verification remain unchanged and run in the required gates.
+
+
+## Real-process termination
+
+`tests/termination.rs` retains all six CLI process cases. Run them with
+`cargo test --locked --test termination --features termination-test-provider`.
+The required `cargo test --locked --all-targets --all-features` gate includes
+all six. Without the nondefault feature this test target has no cases.
+
+| Original case | Replacement evidence |
+| --- | --- |
+| SIGTERM during oMLX streaming | A real `microgentic run --provider omlx` consumes content, then the gateway reports stream readiness through a FIFO. SIGTERM must produce status 143 and `cancelled by SIGTERM`. |
+| SIGTERM during Ollama streaming | The same handshake through `--provider ollama`, with exact status 143 and cancellation diagnostic. |
+| SIGHUP during oMLX streaming | The same content/readiness handshake, delivered SIGHUP, exact status 129 and `cancelled by SIGHUP`. |
+| SIGTERM during an oMLX project command | The real shell tool starts a shell and a blocked descendant. The descendant reports readiness through a separate FIFO; both retain its writer. After SIGTERM, require status 143, the cancellation diagnostic, and EOF with no survivor message. |
+| SIGTERM during an Ollama project command | The same command/descendant handshake and cleanup assertions through `--provider ollama`. |
+| Inherited SIGHUP-ignore, then SIGTERM | The spawned CLI inherits `SIG_IGN` before exec. After stream readiness, deliver SIGHUP and release another content chunk. A second event is emitted only after that chunk is consumed. Then require SIGTERM status 143 and its cancellation diagnostic. This proves progress after SIGHUP, beyond an immediate liveness check. |
+
+The command descendant blocks on another FIFO. After CLI completion the test
+releases that read: any survivor writes `survived` and exits, producing a
+behavioral failure rather than leaving the test waiting forever for EOF.
+Temporarily replacing the production process-group SIGKILL with signal 0
+rejected with `a project process survived cancellation: survived`; restoring
+the group kill passed. Discarding inherited SIGHUP-ignore also rejected with
+status 129 instead of 143. The production dispatcher, signal registration,
+signal-to-cancellation token, tool execution, process-group kill, and two-second
+shutdown bound are retained. No timing assertion, polling, sleep, socket,
+server, Python process, or local model is used. No timing behavior is asserted,
+so these tests need no simulated time. The CI job timeout remains the outer
+watchdog for a broken handshake; the tests themselves have no elapsed-time
+success or failure criterion.
+
+`src/termination_test_provider.rs` supplies a cancellation-aware `LlmGateway`
+inside the spawned process. It reads a command script and uses named pipes for
+coordination. It substitutes the model boundary after signal registration;
+the existing `cfg(test)` dispatcher driver would bypass that registration.
+It reuses the workspace fixture and the existing normalized tool-call shape
+and literal `call-shell_command` ID. An explicit context window avoids provider
+metadata I/O. The double honors the same cancellation token as the production
+gateway, including a request after a cancelled tool. It does not verify
+Mojentic's recovery engine, HTTP serialization, SSE/NDJSON decoding, or remote
+provider behavior. Both provider selections are exercised against normalized
+gateway behavior, with no claim of external provider contract verification.
+No cross-repository contract changes are introduced; existing benchmark request
+oracles and the terminal-outcome contract remain unchanged.
+
+The feature defaults off. `build.rs` permits its hook only in the development
+profile, and the module and injection site additionally require that feature
+and Unix. Release-profile builds exclude the hook even with `--all-features`
+and even if a builder enables release debug assertions. Neither environment
+variables nor CLI arguments can activate code absent from the binary. Release
+verification builds both normal and all-feature release binaries and checks
+that the activation environment-variable name and scripted-provider diagnostics
+are absent from both executables. TUI's shared provider and terminal helpers
+remain intact; registered Python harnesses are untouched.

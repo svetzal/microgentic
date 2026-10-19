@@ -1,4 +1,10 @@
 fn main() {
+    println!("cargo:rustc-check-cfg=cfg(microgentic_termination_test_build)");
+    // A test feature must never expose its provider in a release-profile binary,
+    // even when release debug assertions are explicitly enabled by the builder.
+    if std::env::var("PROFILE").as_deref() == Ok("debug") {
+        println!("cargo:rustc-cfg=microgentic_termination_test_build");
+    }
     println!("cargo:rerun-if-env-changed=MICROGENTIC_RELEASE_REVISION");
     // Release packaging supplies the checked-out revision. Development builds
     // retain the existing live-checkout provenance path.

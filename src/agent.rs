@@ -403,6 +403,13 @@ async fn run_agent_entry(
             evidence.clone(),
         )?),
     };
+    #[cfg(all(
+        feature = "termination-test-provider",
+        microgentic_termination_test_build,
+        unix
+    ))]
+    let gateway =
+        crate::termination_test_provider::override_gateway(gateway, cancellation.clone()).await?;
     let result = run_agent_with_gateway_inner(
         config,
         gateway.as_ref(),
