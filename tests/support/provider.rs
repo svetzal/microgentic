@@ -443,16 +443,6 @@ fn frame(wire: Wire, delta: Value, finish: Option<&str>) -> String {
     }
 }
 
-/// The content of the last tool message in a request.
-pub fn last_tool_result(request: &Value) -> String {
-    request["messages"]
-        .as_array()
-        .and_then(|messages| messages.iter().rev().find(|m| m["role"] == "tool"))
-        .and_then(|message| message["content"].as_str())
-        .unwrap_or_default()
-        .to_owned()
-}
-
 /// Every user message's text, in order.
 pub fn user_messages(request: &Value) -> Vec<String> {
     request["messages"]
@@ -472,16 +462,4 @@ pub fn system_message(request: &Value) -> String {
         .as_str()
         .unwrap_or_default()
         .to_owned()
-}
-
-pub fn tool_names(request: &Value) -> Vec<String> {
-    request["tools"]
-        .as_array()
-        .map(|tools| {
-            tools
-                .iter()
-                .filter_map(|tool| tool["function"]["name"].as_str().map(str::to_owned))
-                .collect()
-        })
-        .unwrap_or_default()
 }

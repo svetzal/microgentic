@@ -109,6 +109,12 @@ pub async fn run_sequential(config: SequentialRunConfig) -> Result<SequentialRun
         .context("reading harness cwd")?
         .canonicalize()
         .context("canonicalizing harness cwd")?;
+    // The CLI test driver supplies the same worker root to retry and run_agent,
+    // without changing the process-wide working directory.
+    #[cfg(test)]
+    let tool_root = crate::outcome_test_io::ACTIVE
+        .try_with(|io| io.tool_root.clone())
+        .unwrap_or(tool_root);
     let artifact = scoped_worker_path(&tool_root, &config.artifact)?;
     let experiment_dir = config
         .agent
