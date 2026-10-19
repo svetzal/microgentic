@@ -325,6 +325,23 @@ gateway behavior, with no claim of external provider contract verification.
 No cross-repository contract changes are introduced; existing benchmark request
 oracles and the terminal-outcome contract remain unchanged.
 
+Readiness delivery is also exercised through `LlmGateway::complete_stream` in
+`termination_test_provider::tests`, with an in-process replacement for the pipe
+I/O boundary. The regression supplies false writable readiness (`WouldBlock`),
+partial writes, and backpressure after partial progress for both `stream-ready`
+and `stream-advanced`. Each write must receive exactly the unwritten suffix;
+the accumulated bytes must equal `stream-ready\nstream-advanced\n` exactly
+once and in order. Pending readiness prevents the next content from reaching
+the caller, and the control read checks the complete first event before allowing
+continued content. Readiness futures yield via the executor without timers,
+real pipes, sleeps, or wall-clock assertions. Separate cases propagate terminal
+readiness errors, terminal write errors, and zero-byte writes, including errors
+after partial progress on each event. The backpressure case fails against the
+single-attempt emitter and passes with readiness waits and suffix retries.
+Run `cargo test --locked --lib --features termination-test-provider
+termination_test_provider::tests`; the required all-feature test gate includes
+these regressions as well as the six unchanged process cases above.
+
 The feature defaults off. `build.rs` permits its hook only in the development
 profile, and the module and injection site additionally require that feature
 and Unix. Release-profile builds exclude the hook even with `--all-features`
