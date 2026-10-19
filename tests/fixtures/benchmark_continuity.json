@@ -1,0 +1,820 @@
+{
+  "schema_version": "microgentic_benchmark_continuity.v1",
+  "models": {
+    "omlx": "Qwen3.8-27B-MLX-8bit",
+    "ollama": "qwen3.8:27b-mxfp8"
+  },
+  "request_controls": {
+    "completion": "CompletionConfig { temperature: Some(1.0), num_ctx: Some(262144), max_tokens: Some(2048), top_p: None, top_k: None, response_format: None, reasoning_effort: Some(Low), reasoning_profile: None, preserve_reasoning: false, max_tool_iterations: 4 }",
+    "max_tokens": 2048,
+    "num_ctx": 262144,
+    "temperature": 1.0
+  },
+  "tools": [
+    {
+      "function": {
+        "description": "List files and directories under the active experiment root with depth and entry limits. Respects the workspace .gitignore.",
+        "name": "list_tree",
+        "parameters": {
+          "properties": {
+            "include_hidden": {
+              "type": "boolean"
+            },
+            "max_depth": {
+              "maximum": 12,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "max_entries": {
+              "maximum": 2000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "type": "function"
+    },
+    {
+      "function": {
+        "description": "Read a UTF-8 file under the active experiment root.",
+        "name": "read_file",
+        "parameters": {
+          "properties": {
+            "line_end": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "line_start": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "max_bytes": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "path"
+          ],
+          "type": "object"
+        }
+      },
+      "type": "function"
+    },
+    {
+      "function": {
+        "description": "Create a new UTF-8 file or replace an entire existing UTF-8 file under the active experiment root. For existing source repairs, prefer edit_file; write_file is whole-file replacement and must preserve unrelated content.",
+        "name": "write_file",
+        "parameters": {
+          "properties": {
+            "content": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "content"
+          ],
+          "type": "object"
+        }
+      },
+      "type": "function"
+    },
+    {
+      "function": {
+        "description": "Apply one or more structured text edits to an existing UTF-8 file under the active experiment root. Use replace_exact for a unique snippet, replace_lines/delete_lines for known line ranges, insert_before/insert_after for a unique anchor, and replace_between for a bounded block between unique anchors. Insert operations are line-aware: when the anchor is a complete line, or the anchor is the non-whitespace suffix of an indented line, inserted text is placed on adjacent complete lines instead of being concatenated onto the anchor line. replace_between is also line-aware for preserved end anchors and returns a boundary preview.",
+        "name": "edit_file",
+        "parameters": {
+          "properties": {
+            "edits": {
+              "items": {
+                "properties": {
+                  "anchor": {
+                    "description": "Existing unique snippet for insert_before or insert_after.",
+                    "type": "string"
+                  },
+                  "end_anchor": {
+                    "description": "Unique ending anchor for replace_between.",
+                    "type": "string"
+                  },
+                  "end_line": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "expected": {
+                    "description": "Optional context that must appear in the selected line range or replace_between block.",
+                    "type": "string"
+                  },
+                  "include_end": {
+                    "description": "For replace_between, include end_anchor in the replaced region. Defaults to false.",
+                    "type": "boolean"
+                  },
+                  "include_start": {
+                    "description": "For replace_between, include start_anchor in the replaced region. Defaults to true.",
+                    "type": "boolean"
+                  },
+                  "kind": {
+                    "enum": [
+                      "replace_exact",
+                      "replace_lines",
+                      "replace_between",
+                      "insert_before",
+                      "insert_after",
+                      "delete_lines"
+                    ],
+                    "type": "string"
+                  },
+                  "new": {
+                    "description": "Replacement text for replace_exact, replace_lines, or replace_between.",
+                    "type": "string"
+                  },
+                  "old": {
+                    "description": "Existing unique snippet for replace_exact.",
+                    "type": "string"
+                  },
+                  "start_anchor": {
+                    "description": "Unique starting anchor for replace_between.",
+                    "type": "string"
+                  },
+                  "start_line": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "text": {
+                    "description": "Inserted text for insert_before or insert_after.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind"
+                ],
+                "type": "object"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "edits"
+          ],
+          "type": "object"
+        }
+      },
+      "type": "function"
+    },
+    {
+      "function": {
+        "description": "Run a shell command from the writable workspace by default, or another scoped child directory. The command result is observational unless it matches an executor-owned declared probe.",
+        "name": "shell_command",
+        "parameters": {
+          "properties": {
+            "command": {
+              "type": "string"
+            },
+            "cwd": {
+              "type": "string"
+            },
+            "timeout_secs": {
+              "maximum": 1800,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "command"
+          ],
+          "type": "object"
+        }
+      },
+      "type": "function"
+    }
+  ],
+  "messages": {
+    "contract": [
+      [
+        {
+          "content": "You are an adaptive terminal-work agent built on Mojentic.\nUse the provided tools to inspect the current workspace, modify artifacts, and run shell commands.\nAll tool paths and shell commands are rooted in the assigned task workspace.\nInfer the relevant technologies and validation methods from the task and workspace; do not assume a language, framework, or build system.\nWork in small observable steps and preserve unrelated files.\nAfter a mutation, run a deterministic command that checks the requested outcome before making further speculative changes.\nUse edit_file for focused changes to existing text and write_file for new files or complete replacements only after reading the current artifact.\nNever end a turn with an empty response. Continue using tools, or reply DONE or FAIL as instructed.\nReply exactly DONE only when the requested end state has been reached and checked.\nIf the task cannot be completed, reply FAIL with one concise reason.",
+          "role": "system"
+        },
+        {
+          "content": "Complete this task inside the current isolated terminal workspace.\n\nInspect the project with list_tree, then finish. Unicode 世界.\n\nInspect the workspace and environment first. Make only task-relevant changes, check the resulting behavior with deterministic commands available in the environment, and use DONE only after that check succeeds.",
+          "role": "user"
+        }
+      ],
+      [
+        {
+          "content": "You are an adaptive terminal-work agent built on Mojentic.\nUse the provided tools to inspect the current workspace, modify artifacts, and run shell commands.\nAll tool paths and shell commands are rooted in the assigned task workspace.\nInfer the relevant technologies and validation methods from the task and workspace; do not assume a language, framework, or build system.\nWork in small observable steps and preserve unrelated files.\nAfter a mutation, run a deterministic command that checks the requested outcome before making further speculative changes.\nUse edit_file for focused changes to existing text and write_file for new files or complete replacements only after reading the current artifact.\nNever end a turn with an empty response. Continue using tools, or reply DONE or FAIL as instructed.\nReply exactly DONE only when the requested end state has been reached and checked.\nIf the task cannot be completed, reply FAIL with one concise reason.",
+          "role": "system"
+        },
+        {
+          "content": "Complete this task inside the current isolated terminal workspace.\n\nInspect the project with list_tree, then finish. Unicode 世界.\n\nInspect the workspace and environment first. Make only task-relevant changes, check the resulting behavior with deterministic commands available in the environment, and use DONE only after that check succeeds.",
+          "role": "user"
+        },
+        {
+          "content": "Inspecting.",
+          "role": "assistant",
+          "tool_calls": [
+            {
+              "arguments": {},
+              "id": "inspection",
+              "name": "list_tree"
+            }
+          ]
+        },
+        {
+          "content": "{\"entries\":[{\"depth\":0,\"kind\":\"file\",\"path\":\"AGENTS.md\",\"size_bytes\":63}],\"entry_count\":1,\"include_hidden\":false,\"max_depth\":4,\"max_entries\":200,\"path\":\"\",\"truncated\":false}",
+          "role": "tool",
+          "tool_calls": [
+            {
+              "arguments": {},
+              "id": "inspection",
+              "name": "list_tree"
+            }
+          ]
+        }
+      ]
+    ],
+    "goal": [
+      [
+        {
+          "content": "You are an adaptive coding harness instance built on Mojentic.\nUse the provided tools to read files, write files, apply unified diffs, and run shell commands.\nUse list_tree to map available files before guessing repository contents.\nUse read_file line ranges and byte limits to keep context small.\nAll tool paths are relative to the generated project root.\nShell commands run from the generated project root by default.\nWork in small steps. Verify with deterministic shell commands before claiming completion.\nCreate Cargo.toml, src/lib.rs, and other generated source at the tool root unless the task says otherwise.\nEnsure a project-appropriate .gitignore exists unless the task explicitly forbids it. If one already exists, leave it unchanged unless the task requires an update.\nIgnore generated build, dependency, cache, and virtual-environment directories such as target/, build/, dist/, node_modules/, .venv/, and __pycache__/. Do not list or inspect ignored paths unless explicitly needed.\nUse timeout_secs 1800 for first cargo build, cargo test, or similarly expensive validation probes.\nAfter a validation failure, repair narrowly: cite the failing command and failure text, inspect only relevant code, prefer edit_file for focused existing-source repairs, then rerun validation.\nFor Rust projects after edits, prefer this validation ladder: cargo fmt --check, cargo clippy --all-targets --all-features -- -D warnings, focused tests, then cargo test.\nUse edit_file for existing source edits. Use write_file for new files, or for existing source only after reading the complete current file and preserving unrelated content.\nNever end a turn with an empty response. Continue using tools, or reply DONE/FAIL as instructed.\nWhen you have completed the task and verified it, answer exactly DONE.\nIf the task cannot be completed, answer exactly FAIL with one concise reason.",
+          "role": "system"
+        },
+        {
+          "content": "Complete this benchmark task inside the generated project workspace.\n\nInspect the project with list_tree, then finish. Unicode 世界.\n\nRequired harness behavior:\n- You are already operating inside the generated project's workspace directory.\n- Inspect the project root first.\n- Ensure a project-appropriate .gitignore exists unless this task explicitly forbids it. If one already exists, leave it unchanged unless the task requires an update.\n- Build or update the Rust project at the current tool root, not in a nested workspace/ directory.\n- Run at least one deterministic validation command.\n- Leave generated project files at the tool root and use DONE only after validation.",
+          "role": "user"
+        }
+      ],
+      [
+        {
+          "content": "You are an adaptive coding harness instance built on Mojentic.\nUse the provided tools to read files, write files, apply unified diffs, and run shell commands.\nUse list_tree to map available files before guessing repository contents.\nUse read_file line ranges and byte limits to keep context small.\nAll tool paths are relative to the generated project root.\nShell commands run from the generated project root by default.\nWork in small steps. Verify with deterministic shell commands before claiming completion.\nCreate Cargo.toml, src/lib.rs, and other generated source at the tool root unless the task says otherwise.\nEnsure a project-appropriate .gitignore exists unless the task explicitly forbids it. If one already exists, leave it unchanged unless the task requires an update.\nIgnore generated build, dependency, cache, and virtual-environment directories such as target/, build/, dist/, node_modules/, .venv/, and __pycache__/. Do not list or inspect ignored paths unless explicitly needed.\nUse timeout_secs 1800 for first cargo build, cargo test, or similarly expensive validation probes.\nAfter a validation failure, repair narrowly: cite the failing command and failure text, inspect only relevant code, prefer edit_file for focused existing-source repairs, then rerun validation.\nFor Rust projects after edits, prefer this validation ladder: cargo fmt --check, cargo clippy --all-targets --all-features -- -D warnings, focused tests, then cargo test.\nUse edit_file for existing source edits. Use write_file for new files, or for existing source only after reading the complete current file and preserving unrelated content.\nNever end a turn with an empty response. Continue using tools, or reply DONE/FAIL as instructed.\nWhen you have completed the task and verified it, answer exactly DONE.\nIf the task cannot be completed, answer exactly FAIL with one concise reason.",
+          "role": "system"
+        },
+        {
+          "content": "Complete this benchmark task inside the generated project workspace.\n\nInspect the project with list_tree, then finish. Unicode 世界.\n\nRequired harness behavior:\n- You are already operating inside the generated project's workspace directory.\n- Inspect the project root first.\n- Ensure a project-appropriate .gitignore exists unless this task explicitly forbids it. If one already exists, leave it unchanged unless the task requires an update.\n- Build or update the Rust project at the current tool root, not in a nested workspace/ directory.\n- Run at least one deterministic validation command.\n- Leave generated project files at the tool root and use DONE only after validation.",
+          "role": "user"
+        },
+        {
+          "content": "Inspecting.",
+          "role": "assistant",
+          "tool_calls": [
+            {
+              "arguments": {},
+              "id": "inspection",
+              "name": "list_tree"
+            }
+          ]
+        },
+        {
+          "content": "{\"entries\":[{\"depth\":0,\"kind\":\"file\",\"path\":\"AGENTS.md\",\"size_bytes\":63}],\"entry_count\":1,\"include_hidden\":false,\"max_depth\":4,\"max_entries\":200,\"path\":\"\",\"truncated\":false}",
+          "role": "tool",
+          "tool_calls": [
+            {
+              "arguments": {},
+              "id": "inspection",
+              "name": "list_tree"
+            }
+          ]
+        }
+      ]
+    ]
+  },
+  "packet_controls": {
+    "omlx": [
+      {
+        "completion": {
+          "max_model_interactions": 4,
+          "max_tokens": 2048,
+          "num_ctx": 262144,
+          "num_predict": null,
+          "preserve_reasoning": false,
+          "reasoning_effort": "low",
+          "reasoning_profile": null,
+          "response_format": null,
+          "temperature": 1.0,
+          "top_k": null,
+          "top_p": null
+        },
+        "harness_limits": {
+          "effective_thinking_only_cap_source": "disabled",
+          "effective_thinking_only_cap_tokens": null,
+          "max_thinking_only_tokens": 0,
+          "repair_exit_thinking_tokens": 0,
+          "thinking_disabled": false,
+          "validation_repair_active": false
+        },
+        "llm_call_depth": 0,
+        "provider": "omlx",
+        "provider_controls": {
+          "chat_template_kwargs": null,
+          "context_window_source": "server_model_configuration",
+          "enable_thinking": null,
+          "max_tokens": 2048,
+          "reasoning_effort": "low"
+        },
+        "schema_version": "provider_request.v1",
+        "turn": 1
+      },
+      {
+        "completion": {
+          "max_model_interactions": 4,
+          "max_tokens": 2048,
+          "num_ctx": 262144,
+          "num_predict": null,
+          "preserve_reasoning": false,
+          "reasoning_effort": "low",
+          "reasoning_profile": null,
+          "response_format": null,
+          "temperature": 1.0,
+          "top_k": null,
+          "top_p": null
+        },
+        "harness_limits": {
+          "effective_thinking_only_cap_source": "disabled",
+          "effective_thinking_only_cap_tokens": null,
+          "max_thinking_only_tokens": 0,
+          "repair_exit_thinking_tokens": 0,
+          "thinking_disabled": false,
+          "validation_repair_active": false
+        },
+        "llm_call_depth": 1,
+        "provider": "omlx",
+        "provider_controls": {
+          "chat_template_kwargs": null,
+          "context_window_source": "server_model_configuration",
+          "enable_thinking": null,
+          "max_tokens": 2048,
+          "reasoning_effort": "low"
+        },
+        "schema_version": "provider_request.v1",
+        "turn": 1
+      }
+    ],
+    "ollama": [
+      {
+        "completion": {
+          "max_model_interactions": 4,
+          "max_tokens": 2048,
+          "num_ctx": 262144,
+          "num_predict": null,
+          "preserve_reasoning": false,
+          "reasoning_effort": "low",
+          "reasoning_profile": null,
+          "response_format": null,
+          "temperature": 1.0,
+          "top_k": null,
+          "top_p": null
+        },
+        "harness_limits": {
+          "effective_thinking_only_cap_source": "disabled",
+          "effective_thinking_only_cap_tokens": null,
+          "max_thinking_only_tokens": 0,
+          "repair_exit_thinking_tokens": 0,
+          "thinking_disabled": false,
+          "validation_repair_active": false
+        },
+        "llm_call_depth": 0,
+        "provider": "ollama",
+        "provider_controls": {
+          "context_window_source": "request_options",
+          "num_ctx": 262144,
+          "num_predict": 2048,
+          "think": "low"
+        },
+        "schema_version": "provider_request.v1",
+        "turn": 1
+      },
+      {
+        "completion": {
+          "max_model_interactions": 4,
+          "max_tokens": 2048,
+          "num_ctx": 262144,
+          "num_predict": null,
+          "preserve_reasoning": false,
+          "reasoning_effort": "low",
+          "reasoning_profile": null,
+          "response_format": null,
+          "temperature": 1.0,
+          "top_k": null,
+          "top_p": null
+        },
+        "harness_limits": {
+          "effective_thinking_only_cap_source": "disabled",
+          "effective_thinking_only_cap_tokens": null,
+          "max_thinking_only_tokens": 0,
+          "repair_exit_thinking_tokens": 0,
+          "thinking_disabled": false,
+          "validation_repair_active": false
+        },
+        "llm_call_depth": 1,
+        "provider": "ollama",
+        "provider_controls": {
+          "context_window_source": "request_options",
+          "num_ctx": 262144,
+          "num_predict": 2048,
+          "think": "low"
+        },
+        "schema_version": "provider_request.v1",
+        "turn": 1
+      }
+    ]
+  },
+  "ledgers": {
+    "contract": [
+      {
+        "assembly_policy": "append_summarized_tool_transcript",
+        "completion_temperature": 1.0,
+        "components": [
+          {
+            "content_chars": 954,
+            "estimated_tokens": 239,
+            "inclusion_reason": "base_system_prompt",
+            "index": 0,
+            "reasoning_chars": 0,
+            "role": "system",
+            "tool_call_chars": 0,
+            "tool_call_count": 0,
+            "tool_names": [],
+            "total_chars": 954
+          },
+          {
+            "content_chars": 343,
+            "estimated_tokens": 86,
+            "inclusion_reason": "authoritative_initial_context_packet",
+            "index": 1,
+            "reasoning_chars": 0,
+            "role": "user",
+            "tool_call_chars": 0,
+            "tool_call_count": 0,
+            "tool_names": [],
+            "total_chars": 343
+          }
+        ],
+        "context_window_tokens": 262144,
+        "delta_chars_from_previous_call": null,
+        "estimated_tokens": 1246,
+        "llm_call_depth": 0,
+        "max_model_interactions": 4,
+        "message_chars": 1297,
+        "message_count": 2,
+        "pressure_band": "green",
+        "previous_call_total_chars": null,
+        "role_chars": {
+          "system": 954,
+          "user": 343
+        },
+        "role_counts": {
+          "system": 1,
+          "user": 1
+        },
+        "tool_descriptor_chars": 3686,
+        "total_chars": 4983,
+        "transcript_policy": "summarized-transcript",
+        "turn": 1,
+        "utilization": 0.00475311279296875
+      },
+      {
+        "assembly_policy": "append_summarized_tool_transcript",
+        "completion_temperature": 1.0,
+        "components": [
+          {
+            "content_chars": 954,
+            "estimated_tokens": 239,
+            "inclusion_reason": "base_system_prompt",
+            "index": 0,
+            "reasoning_chars": 0,
+            "role": "system",
+            "tool_call_chars": 0,
+            "tool_call_count": 0,
+            "tool_names": [],
+            "total_chars": 954
+          },
+          {
+            "content_chars": 343,
+            "estimated_tokens": 86,
+            "inclusion_reason": "authoritative_initial_context_packet",
+            "index": 1,
+            "reasoning_chars": 0,
+            "role": "user",
+            "tool_call_chars": 0,
+            "tool_call_count": 0,
+            "tool_names": [],
+            "total_chars": 343
+          },
+          {
+            "content_chars": 11,
+            "estimated_tokens": 17,
+            "inclusion_reason": "retained_assistant_tool_request",
+            "index": 2,
+            "reasoning_chars": 0,
+            "role": "assistant",
+            "tool_call_chars": 55,
+            "tool_call_count": 1,
+            "tool_names": [
+              "list_tree"
+            ],
+            "total_chars": 66
+          },
+          {
+            "content_chars": 173,
+            "estimated_tokens": 57,
+            "inclusion_reason": "retained_raw_tool_result",
+            "index": 3,
+            "reasoning_chars": 0,
+            "role": "tool",
+            "tool_call_chars": 55,
+            "tool_call_count": 1,
+            "tool_names": [
+              "list_tree"
+            ],
+            "total_chars": 228
+          }
+        ],
+        "context_window_tokens": 262144,
+        "delta_chars_from_previous_call": 294,
+        "estimated_tokens": 1320,
+        "llm_call_depth": 1,
+        "max_model_interactions": 4,
+        "message_chars": 1591,
+        "message_count": 4,
+        "pressure_band": "green",
+        "previous_call_total_chars": 4983,
+        "role_chars": {
+          "assistant": 66,
+          "system": 954,
+          "tool": 228,
+          "user": 343
+        },
+        "role_counts": {
+          "assistant": 1,
+          "system": 1,
+          "tool": 1,
+          "user": 1
+        },
+        "tool_descriptor_chars": 3686,
+        "total_chars": 5277,
+        "transcript_policy": "summarized-transcript",
+        "turn": 1,
+        "utilization": 0.005035400390625
+      }
+    ],
+    "goal": [
+      {
+        "assembly_policy": "append_summarized_tool_transcript",
+        "completion_temperature": 1.0,
+        "components": [
+          {
+            "content_chars": 1877,
+            "estimated_tokens": 470,
+            "inclusion_reason": "base_system_prompt",
+            "index": 0,
+            "reasoning_chars": 0,
+            "role": "system",
+            "tool_call_chars": 0,
+            "tool_call_count": 0,
+            "tool_names": [],
+            "total_chars": 1877
+          },
+          {
+            "content_chars": 680,
+            "estimated_tokens": 170,
+            "inclusion_reason": "authoritative_initial_context_packet",
+            "index": 1,
+            "reasoning_chars": 0,
+            "role": "user",
+            "tool_call_chars": 0,
+            "tool_call_count": 0,
+            "tool_names": [],
+            "total_chars": 680
+          }
+        ],
+        "context_window_tokens": 262144,
+        "delta_chars_from_previous_call": null,
+        "estimated_tokens": 1561,
+        "llm_call_depth": 0,
+        "max_model_interactions": 4,
+        "message_chars": 2557,
+        "message_count": 2,
+        "pressure_band": "green",
+        "previous_call_total_chars": null,
+        "role_chars": {
+          "system": 1877,
+          "user": 680
+        },
+        "role_counts": {
+          "system": 1,
+          "user": 1
+        },
+        "tool_descriptor_chars": 3686,
+        "total_chars": 6243,
+        "transcript_policy": "summarized-transcript",
+        "turn": 1,
+        "utilization": 0.005954742431640625
+      },
+      {
+        "assembly_policy": "append_summarized_tool_transcript",
+        "completion_temperature": 1.0,
+        "components": [
+          {
+            "content_chars": 1877,
+            "estimated_tokens": 470,
+            "inclusion_reason": "base_system_prompt",
+            "index": 0,
+            "reasoning_chars": 0,
+            "role": "system",
+            "tool_call_chars": 0,
+            "tool_call_count": 0,
+            "tool_names": [],
+            "total_chars": 1877
+          },
+          {
+            "content_chars": 680,
+            "estimated_tokens": 170,
+            "inclusion_reason": "authoritative_initial_context_packet",
+            "index": 1,
+            "reasoning_chars": 0,
+            "role": "user",
+            "tool_call_chars": 0,
+            "tool_call_count": 0,
+            "tool_names": [],
+            "total_chars": 680
+          },
+          {
+            "content_chars": 11,
+            "estimated_tokens": 17,
+            "inclusion_reason": "retained_assistant_tool_request",
+            "index": 2,
+            "reasoning_chars": 0,
+            "role": "assistant",
+            "tool_call_chars": 55,
+            "tool_call_count": 1,
+            "tool_names": [
+              "list_tree"
+            ],
+            "total_chars": 66
+          },
+          {
+            "content_chars": 173,
+            "estimated_tokens": 57,
+            "inclusion_reason": "retained_raw_tool_result",
+            "index": 3,
+            "reasoning_chars": 0,
+            "role": "tool",
+            "tool_call_chars": 55,
+            "tool_call_count": 1,
+            "tool_names": [
+              "list_tree"
+            ],
+            "total_chars": 228
+          }
+        ],
+        "context_window_tokens": 262144,
+        "delta_chars_from_previous_call": 294,
+        "estimated_tokens": 1635,
+        "llm_call_depth": 1,
+        "max_model_interactions": 4,
+        "message_chars": 2851,
+        "message_count": 4,
+        "pressure_band": "green",
+        "previous_call_total_chars": 6243,
+        "role_chars": {
+          "assistant": 66,
+          "system": 1877,
+          "tool": 228,
+          "user": 680
+        },
+        "role_counts": {
+          "assistant": 1,
+          "system": 1,
+          "tool": 1,
+          "user": 1
+        },
+        "tool_descriptor_chars": 3686,
+        "total_chars": 6537,
+        "transcript_policy": "summarized-transcript",
+        "turn": 1,
+        "utilization": 0.006237030029296875
+      }
+    ]
+  },
+  "summary_keys": [
+    "acceptance_interactions_trace_file",
+    "acceptance_ledger",
+    "acceptance_ledger_entry_count",
+    "acceptance_plan_trace_file",
+    "action_boundary_interrupt_tokens",
+    "advisory_selected_context_ids",
+    "context_window_tokens",
+    "excluded_initial_context_ids",
+    "expected_output_tokens",
+    "experiment_dir",
+    "final_summary",
+    "goal_file",
+    "harness_source_state",
+    "initial_context_catalog_file",
+    "max_iterations",
+    "max_model_interactions",
+    "max_thinking_only_tokens",
+    "max_tokens",
+    "model",
+    "packet_type",
+    "preserve_reasoning",
+    "provider",
+    "reasoning_checkpoint_tokens",
+    "reasoning_effort",
+    "reasoning_profile",
+    "repair_exit_thinking_tokens",
+    "repair_handoff_policy",
+    "required_initial_context_ids",
+    "semantic_advisor_model",
+    "tool_root",
+    "trace_file",
+    "transcript_policy"
+  ],
+  "sequential_summary_keys": [
+    "artifact",
+    "attempts",
+    "confirmed_exact_success",
+    "cumulative_failed_repair_cycles",
+    "cumulative_observed_output_tokens",
+    "cumulative_runtime_seconds",
+    "expected_artifact",
+    "max_attempts",
+    "max_consecutive_unchanged_attempts",
+    "max_failed_repair_cycles",
+    "schema_version",
+    "stop_reason",
+    "summary_file"
+  ],
+  "attempts": [
+    {
+      "accepted_done": true,
+      "artifact_unchanged": true,
+      "attempt": 1,
+      "consecutive_unchanged_attempts": 1,
+      "cumulative_failed_repair_cycles": 0,
+      "explicit_fail": false,
+      "failed_repair_cycles": 0,
+      "final_summary": "Inspecting.\nDONE",
+      "independent_exact": false,
+      "observed_output_tokens": 0,
+      "outcome": {
+        "kind": "done"
+      },
+      "passing_probes": 0,
+      "post_artifact": {
+        "bytes": 0,
+        "exists": false,
+        "sha256": null
+      },
+      "pre_artifact": {
+        "bytes": 0,
+        "exists": false,
+        "sha256": null
+      },
+      "terminal_error": null
+    },
+    {
+      "accepted_done": true,
+      "artifact_unchanged": true,
+      "attempt": 2,
+      "consecutive_unchanged_attempts": 2,
+      "cumulative_failed_repair_cycles": 0,
+      "explicit_fail": false,
+      "failed_repair_cycles": 0,
+      "final_summary": "Inspecting.\nDONE",
+      "independent_exact": false,
+      "observed_output_tokens": 0,
+      "outcome": {
+        "kind": "done"
+      },
+      "passing_probes": 0,
+      "post_artifact": {
+        "bytes": 0,
+        "exists": false,
+        "sha256": null
+      },
+      "pre_artifact": {
+        "bytes": 0,
+        "exists": false,
+        "sha256": null
+      },
+      "terminal_error": null
+    }
+  ]
+}

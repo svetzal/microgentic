@@ -124,8 +124,9 @@ Rapid attempts sharing a trace directory can therefore fail before work starts.
   Compare resolved requests, controls, and terminal evidence with deterministic
   fixtures.
   Progress: benchmark and compatibility exits are unchanged, and the
-  continuity test holds requests, ledgers, and existing summary fields fixed
-  while allowing the one additive `outcome` key.
+  in-process continuity suite holds complete gateway requests, assembled packets,
+  ledgers, and existing summary fields fixed. Historical summary compatibility
+  permits only the documented additive `outcome`, `changes`, and `checks` keys.
 
 Start with trace uniqueness as a separate small commit, then implement the shared
 outcome. Streaming JSONL and downstream cancellation follow once terminal results

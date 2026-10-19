@@ -110,23 +110,22 @@ cargo clippy --all-targets -- -D warnings
 
 The end-to-end tests are Rust and run under `cargo test`. `tests/tui.rs`
 drives the real TUI in a pseudo-terminal and reads the rendered screen.
-`tests/everyday_runs.rs` covers the calculator tool and project guidance.
-`tests/benchmark_continuity.rs` checks that benchmark runs send the same
-provider requests as the legacy task commands. All of them use a mock oMLX and
-Ollama server from `tests/support/`, never a model. The TUI tests need a Unix
-pseudo-terminal.
+`src/cli/everyday_runs.rs` covers the calculator tool and project guidance.
+`src/cli/benchmark_continuity.rs` checks benchmark and legacy task dispatch
+against fixed complete gateway requests, assembled packets and context ledgers.
+These CLI suites use an in-process gateway double. The TUI and termination
+integration suites retain the mock oMLX and Ollama server from `tests/support/`,
+never a model. The TUI tests need a Unix pseudo-terminal.
 
-To check that a change keeps benchmark requests identical to an older build,
-keep that build's binary and compare it with the current one:
+Run benchmark continuity, including contract conversation isolation, with:
 
 ```sh
-MICROGENTIC_CONTINUITY_BASELINE=/path/to/old/microgentic \
-  cargo test --test benchmark_continuity -- --ignored --nocapture
+cargo test --locked --lib cli::benchmark_continuity
 ```
 
-The test prints a report with both binaries' SHA-256 hashes. Set
-`MICROGENTIC_CONTINUITY_MODE=conversation` to compare contract runs through
-`run --prompt` only.
+The historical socket-based binary comparison has been retired. Versioned
+expectations now guard both dispatch paths against drifting together; see
+[`tests/README.md`](tests/README.md) for the characterization and coverage limits.
 
 ## License
 

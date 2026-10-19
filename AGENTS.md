@@ -50,8 +50,10 @@ mdbook build book
 End-to-end tests are Rust integration tests. Build new ones on `tests/support/`:
 a pseudo-terminal driver with a rendered screen, one mock server for oMLX and
 Ollama, and workspace fixtures. Do not add Python test scripts under `tests/`.
-To compare benchmark requests with an older binary, run
-`MICROGENTIC_CONTINUITY_BASELINE=<old binary> cargo test --test benchmark_continuity -- --ignored --nocapture`.
+Benchmark continuity runs in-process with
+`cargo test --locked --lib cli::benchmark_continuity`. Fixed gateway request,
+packet and ledger expectations replace the retired socket-based old-binary
+comparison; see `tests/README.md` for its coverage and limits.
 The recovery tests call the Python harness in `fixtures/recovery/` and
 `fixtures/progress/`. Stacey decided on 2026-10-15 that this harness stays in
 Python, because registered experiments run it and hash-register it. Do not port
