@@ -21,7 +21,7 @@ name = "adaptive-agent-harness"
 path = "src/bin/legacy.rs"
 
 [features]
-# Real-process termination tests only; excluded from release-profile binaries.
+# Executable termination and TUI test gateways; excluded from release profiles.
 termination-test-provider = []
 
 [dependencies]

@@ -266,6 +266,44 @@ fn sprout(segment: &mut Styled) {
     }
 }
 
+/// Real elapsed time in ordinary sessions; a manually advanced clock in
+/// executable tests. The test input is absent from release artifacts.
+pub(super) struct Clock {
+    started: std::time::Instant,
+    #[cfg(all(
+        feature = "termination-test-provider",
+        microgentic_termination_test_build,
+        unix
+    ))]
+    manual: Option<std::path::PathBuf>,
+}
+impl Clock {
+    pub(super) fn start() -> Self {
+        Self {
+            started: std::time::Instant::now(),
+            #[cfg(all(
+                feature = "termination-test-provider",
+                microgentic_termination_test_build,
+                unix
+            ))]
+            manual: std::env::var_os("MICROGENTIC_TUI_CLOCK").map(Into::into),
+        }
+    }
+    pub(super) fn elapsed(&self) -> anyhow::Result<Duration> {
+        #[cfg(all(
+            feature = "termination-test-provider",
+            microgentic_termination_test_build,
+            unix
+        ))]
+        if let Some(path) = &self.manual {
+            return Ok(Duration::from_millis(
+                std::fs::read_to_string(path)?.trim().parse()?,
+            ));
+        }
+        Ok(self.started.elapsed())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

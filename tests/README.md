@@ -1,4 +1,4 @@
-# In-process CLI coverage
+# CLI and terminal coverage
 
 ## Gateway request migration
 
@@ -10,7 +10,8 @@ starts a provider, invokes Python, sleeps, or asserts wall-clock timing. The
 remaining `tests/omlx_gateway.rs` case is intentionally socket-free serialization
 coverage. The private server, HTTP reader, metadata polling, response encoders
 and process launch helpers from that file have been removed; shared support in
-`tests/support/provider.rs`, `terminal.rs` and `fixtures.rs` remains in use.
+`tests/support/fixtures.rs` remains in use; the TUI server and old terminal
+driver have now been removed (see the TUI characterization below).
 
 Characterization of every case remaining before this migration:
 
@@ -167,8 +168,8 @@ opens sockets, starts servers or Python harnesses, sleeps, or measures wall time
 Provider selection coverage is retained for both oMLX and Ollama; these are
 gateway conformance tests, not HTTP wire-format tests. The provider transport
 and cross-repository executable contracts are unchanged by this migration.
-The shared end-to-end modules `provider.rs`, `fixtures.rs`, `terminal.rs`
-and `mod.rs` retain callers in the remaining suites.
+Only `tests/support/fixtures.rs` retains callers, including the unchanged
+termination suite; the obsolete server, terminal driver and module were removed.
 
 `src/cli/everyday_runs.rs` replaces all 19 cases from `tests/everyday_runs.rs`.
 The following characterization was made from the original assertions before
@@ -211,7 +212,8 @@ JSON body, and parsing of Ollama's textual `parameters.num_ctx` alongside
 provides no evidence about that parsing. SSE/NDJSON parsing and client timing
 measurement are likewise outside the replacement evidence. The exclusively
 unused server num_ctx setter and plumbing were removed; shared window/listing,
-stream, fixture and terminal support retain their callers.
+fixtures retain their callers. The TUI migration below replaces the remaining
+server and terminal support.
 
 No application/repository boundary, contract version, dependency, feature or
 public API changes. The existing executable outcome contract remains
@@ -220,9 +222,8 @@ public API changes. The existing executable outcome contract remains
 Both the Rust producer suite and Python consumer suite verify it in this
 repository's required gates. No external provider verification is claimed.
 
-Remaining campaign work: `tui` still uses `tests/support/provider.rs` and
-`tests/support/terminal.rs`; their shared server and terminal support remains. Registered
-Python recovery/progress harnesses and experiment inputs are unchanged.
+The TUI migration below completes removal of that server and terminal support.
+Registered Python recovery/progress harnesses and experiment inputs are unchanged.
 
 ## Benchmark continuity
 
@@ -250,7 +251,7 @@ The original cases and ignored comparison were characterized before migration:
 | Ignored historical comparison's benchmark mode: all six cases, request/packet/ledger equality, additive summary compatibility, attempt fields | Permanent cases plus fixed expectations retain these Microgentic guarantees at the gateway boundary. Arbitrary old executables are no longer run or claimed verified. |
 | Ignored historical comparison's conversation mode: contract `run --prompt` isolation for both providers | Now permanent `contract_conversation_isolation_both_providers`, with full fixed request/packet/ledger assertions, metadata/state/trace exclusions and compatibility-executable dispatch. This is task isolation when a contract/experiment is supplied, not an everyday conversation session. |
 | Old driver probes --help for --json, selects binaries via CONTINUITY_* variables and prints binary SHA-256/report schema | Retired with the historical driver. These identify external executable comparisons, not runtime compatibility behavior; there is no replacement historical-binary report or claim of verifying an unavailable old revision. |
-| Provider-specific HTTP serialization, SSE/NDJSON stream parsing and encoding of tool IDs | Transport-only coverage retired from this suite. Actual normalized LlmGateway messages, IDs, descriptors and completion controls are retained exactly. Mojentic owns HTTP serialization/parsing; no external Mojentic verification is claimed. TUI still retains its existing server; termination uses the scripted gateway below. |
+| Provider-specific HTTP serialization, SSE/NDJSON stream parsing and encoding of tool IDs | Transport-only coverage retired from this suite. Actual normalized LlmGateway messages, IDs, descriptors and completion controls are retained exactly. Mojentic owns HTTP serialization/parsing; no external Mojentic verification is claimed. TUI and termination now use socket-free gateway doubles as described below. |
 
 Fixed expectations live in `tests/fixtures/benchmark_continuity.json`, version
 `microgentic_benchmark_continuity.v1`, SHA-256
@@ -349,5 +350,119 @@ and even if a builder enables release debug assertions. Neither environment
 variables nor CLI arguments can activate code absent from the binary. Release
 verification builds both normal and all-feature release binaries and checks
 that the activation environment-variable name and scripted-provider diagnostics
-are absent from both executables. TUI's shared provider and terminal helpers
-remain intact; registered Python harnesses are untouched.
+are absent from both executables. The TUI test gateway uses the same release
+exclusion, and its activation names are checked too. Registered Python harnesses
+are untouched.
+
+## Executable TUI journeys
+
+`tests/tui.rs` retains all 28 original cases and their names. Characterization
+was made from every original assertion before changing the suite. These tests
+still launch the actual `microgentic` or `adaptive-agent-harness` executable on
+a PTY, send terminal input, render its output through vt100, execute the real
+conversation worker and tools, and inspect native state and traces. They do
+not substitute direct calls to a renderer for a CLI journey.
+
+The double lives at the public Mojentic `LlmGateway` boundary inside the
+executable. `tests/tui_support/gateway.rs` supplies normalized stream chunks over
+named pipes; there is no HTTP server, socket, external provider or local model.
+Both the child conversation worker and the independent TUI model-listing path
+use it, as does model-context discovery. Captured requests contain actual
+serialized native messages, descriptors and every completion control, rather
+than reconstructed provider wire bodies. A reply pipe belongs to one request:
+unread frames from cancellation cannot enter the next exchange. Pending reads
+select against runtime cancellation. Blocking pipe setup runs on Tokio's
+blocking pool. Metadata lookups record their operation and complete model input.
+
+The following mapping covers every original case. `{omlx,ollama}` denotes the
+two retained provider cases; both executable names means all four retained
+`[legacy_]tui_streams_and_keeps_native_history_{omlx,ollama}` cases.
+
+| Original case or family | Assertion-to-evidence mapping |
+| --- | --- |
+| `tui_opens_without_a_provider_and_restores_the_terminal` | Actual welcome and ready label, green/bold marker, colour sequences, complete DEC synchronized frames, active raw mode, clean Esc exit and restored termios remain asserted. Resize to 5×20 now waits for and asserts rendered `世界`, replacing the former 100 ms pause with stronger evidence. Both gateway requests and metadata operations must be empty. |
+| `an_empty_no_color_keeps_colour` | Empty `NO_COLOR` still produces colour on the actual terminal, then restores its modes on clean exit. |
+| `no_color_removes_colour_but_keeps_labels_and_attributes` | Nonempty `NO_COLOR` removes foreground codes; the ready label retains default foreground and bold attributes; clean exit/restoration remain. |
+| `tui_chats_naturally_and_can_perform_work_when_requested_{omlx,ollama}` | Idle startup makes no conversation call. Greetings have no assumed engineering task or evidence footer. An empty reply continues; discussing a quoted command executes nothing. Explicit work writes the exact Rust source, real offline `cargo check` succeeds, its trace records the write/check, project work has an evidence footer, later thanks has none. Native prompts and conversational system policy remain asserted. |
+| Both executable names: streamed native history | A long untruncated live reply is visible while a stream gate is closed. Real `read_file` output and Unicode survive into the complete next request. Read-only project work retains its evidence footer. Ctrl-C leaves an error in native state, excludes partial content, and the next request retains the codename and stopped-request notice. Wrong model/project state is rejected by the actual worker before gateway invocation. An ordinary `run` starts with fresh history and identical completion controls; compatibility `run` retains its historical descriptor set. A second TUI starts a separate conversation. |
+| `tui_slash_commands_stay_local_{omlx,ollama}` | Actual `/help`, `/guidance`, invalid command/effort, model and effort pickers, keyboard selection/cancel, unchanged-settings notices, clear, default effort, `//` escaping and commands during a held reply retain their rendered assertions. Requests prove model/effort changes, history reset/retention, preserved saved config and retained session files. Full listing operation is recorded; picker asserts both actual model names. Native completion config replaces HTTP-specific effort fields. |
+| `tui_shows_each_tool_call_as_one_live_line_{omlx,ollama}` | A real shell waits on a FIFO until both batch tool lines are rendered running; a manually advanced spinner tick produces a different glyph before release. Success, missing-file failure, arithmetic result, green/red cells, one line per call, no residual spinner/Using/finished lines and the evidence footer remain asserted. `sleep 1` becomes `read -r release < tool-control`; the command label changes accordingly. |
+| `tui_status_bar_shows_git_state_and_a_known_context_window` | Complete identity/branch/modified/untracked/empty-gauge row and its semantic colours remain exact. Actual ledger token usage determines the displayed percentage, and new untracked work appears after the next exchange. Real Git operations remain. |
+| `tui_status_bar_shows_only_what_it_knows_outside_git` | Complete identity-only initial row, colours and unknown-window compact token count remain asserted against the actual trace ledger; no invented branch or capacity. |
+| `tui_launch_animation_settles_on_the_resting_screen` | Manual time advances through seed, burst/assembled letters and final welcome. At least six painted frames, seed/wordmark, final resting frame, current resting screen and no provider operations remain asserted. The wall-clock `<2.4s` threshold and 300 ms quiet period are deleted: the injected timeline reaches the final screen at 2000 ms without measuring host performance. |
+| `tui_launch_animation_is_skipped_by_a_key_that_still_lands` | At the first observed seed, `x` is delivered to the real terminal. The first frame containing it and every subsequent observed frame remain resting; the exact input row is `> x`. Advancing to 2000 ms and sending `y` preserves the resting screen and `> xy`. No real delay or provider operation. |
+| `tui_streams_thinking_live_and_collapses_it_{omlx,ollama}` | Stream gates preserve live multi-chunk thinking before tool execution, dim/italic cells, accumulated text, tool-result evidence and collapse to the final reply; full thinking no longer occupies the screen. |
+| `tui_wraps_replies_at_words_and_keeps_indentation_{omlx,ollama}` | Real terminal rows preserve complete word sequences, blank lines, bullets and indentation without wrapping into the input/chrome. Long no-space tokens and explicit breaks retain their original assertions. |
+| `tui_context_panel_shows_the_latest_request_{omlx,ollama}` | Ctrl-O and `/context` open/close the real side panel. Empty state, current exchange/request/model, system/tools/prompt components, prior native turns in order, retained/new labels, scrolling, held-request contents and tool-loop updates remain asserted. |
+| `tui_shows_the_discovered_window_and_residency_{omlx,ollama}` | Discovered 100k capacity, Ollama's 32768 request cap, pinned root guidance/system/tools/prompt, standing-item count and percentage remain asserted. Exact metadata operation/model plus native state prove the second exchange reuses discovery. Optional absent capacity remains covered by status/history cases. |
+| `tui_ends_when_its_terminal_hangs_up` | Close every controlling PTY handle after observing the CLI's input hint. Real SIGHUP/terminal EOF behavior must return exit 1, rather than the forced signal exit 129. No sleep, polling loop or elapsed-time threshold. |
+| `tui_ends_on_a_termination_signal_and_restores_the_terminal` | Dispatch real SIGTERM and SIGHUP to the idle CLI, wait for the actual child status, assert success and restored termios. |
+| `tui_ends_on_sigterm_while_a_reply_streams` | Observe partial content while held, dispatch real SIGTERM, wait for successful child exit and assert restored termios. Also now runs both providers and checks native state records interruption without retaining partial content. |
+
+The additional `tui_model_listing_errors_leave_the_conversation_usable_both_providers`
+case drives `/model` through a gateway error, asserts the exact rendered provider
+error and complete listing input, then sends a normal message and verifies the
+unchanged model, actual prompt, successful answer and context-discovery input.
+This covers the listing boundary independently of the conversation worker.
+
+`tests/fixtures/tui_gateway.json` is the internal regression specification
+`microgentic_tui_gateway.v1` (SHA-256
+`29c923b7ec46df41c3a20209d15bbd5a017e29ac07a06a8f6b205350ef72a875`). It specifies the entire initial request and
+follow-up native history, including literal consolidated-observation ID, read
+signature, Unicode content and optional-field omissions. The descriptor list
+reuses `microgentic_benchmark_continuity.v1` from
+`tests/fixtures/benchmark_continuity.json`, adding the literal conversational
+calculator descriptor. All four executable/provider history journeys compare
+complete requests with this specification. Expectations are reviewed literals;
+identifiers are never masked or copied from the observed request. Stream chunks
+are gateway inputs, not a claim of verification of Mojentic's HTTP implementation.
+
+`tests/tui_support/pty.rs` records completed DEC synchronized updates and wakes
+waiters with a condition variable. Its timeout is a missing-event watchdog,
+never a settling delay or a behavioral wall-clock assertion. Child completion
+uses blocking process wait, hangup uses descriptor readiness, and stream/tool
+progress uses explicit gates/FIFOs. Launch and spinner time are injected through
+a manually advanced clock; ordinary sessions retain their real monotonic clock.
+The old `tests/support/{mod,provider,terminal}.rs` files and unused terminal
+methods are deleted. `tests/support/fixtures.rs` and its helpers are retained for
+`tests/termination.rs` and existing in-process suites. Registered recovery and
+progress fixtures and the landed termination tests are unchanged.
+
+Transport-only HTTP routing, SSE/NDJSON encoding, provider JSON effort-field
+placement and provider metadata parsing are retired from this suite. Native
+provider selection, IDs, completion controls, history and Ollama accounting cap
+remain checked. No public application/repository contract changed and no
+external provider verification is claimed. The existing versioned benchmark
+continuity and Rust/Python terminal-outcome contracts are unchanged and remain
+in the required gates. This suite proves executable wiring and the terminal
+journey in addition to the existing gateway conformance coverage.
+
+Run the focused journeys with:
+
+```sh
+cargo test --locked --features termination-test-provider --test tui
+cargo test --locked --lib cli::benchmark_continuity
+cargo test --locked --test termination --features termination-test-provider
+```
+
+The test feature defaults off. The TUI gateway, clock activation and injection
+sites require Unix, the feature and the development-profile cfg from `build.rs`.
+They are absent from release builds, including release builds with all features.
+The ordinary idle smoke case can still use `MICROGENTIC_TEST_BINARY` to launch a
+copied release executable; no gateway activation is needed for that journey.
+
+Required final verification (also defined in `.hone-gates.json`):
+
+```sh
+cargo fmt --all -- --check
+cargo clippy --locked --all-targets --all-features -- -D warnings
+cargo test --locked --all-targets --all-features
+cargo build --locked --release --bins
+python3 -m unittest discover -s benchmarks -p 'test_collection_validation.py'
+python3 -m unittest discover -s benchmarks -p 'test_terminal_outcome.py'
+mdbook build book
+```
+
+Also build `cargo build --locked --release --all-features --bins` and inspect
+both binaries for absence of `MICROGENTIC_TUI_SCRIPT`, `MICROGENTIC_TUI_CLOCK`
+and `MICROGENTIC_TERMINATION_SCRIPT` to check release exclusion.

@@ -316,6 +316,16 @@ async fn available_models(provider: Provider) -> Result<Vec<String>, String> {
     use mojentic::llm::LlmGateway;
     use mojentic::llm::gateways::{OllamaGateway, OmlxGateway};
     let request = async {
+        #[cfg(all(
+            feature = "termination-test-provider",
+            microgentic_termination_test_build,
+            unix
+        ))]
+        if let Some(gateway) =
+            crate::tui_test_provider::gateway(tokio_util::sync::CancellationToken::new())
+        {
+            return gateway.get_available_models().await;
+        }
         match provider {
             Provider::Omlx => OmlxGateway::new().get_available_models().await,
             Provider::Ollama => OllamaGateway::new().get_available_models().await,

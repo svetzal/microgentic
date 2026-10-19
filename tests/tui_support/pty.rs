@@ -7,24 +7,19 @@
 //! blocks on a full buffer, and keeps the raw bytes and a history of rendered
 //! screens for the few tests that need them.
 //!
-//! A frame can reach the reader in several chunks, so a screen read at an
-//! arbitrary moment can show the top of a new frame over blank rows. Waits
-//! therefore return only a settled screen: no synchronized update (DEC mode
-//! 2026, which the TUI wraps around each frame) is open, and the terminal has
-//! been quiet for `SETTLE`. The frame history keeps only screens at the end of
-//! an update.
+//! Completed DEC synchronized updates are observable render events. Waiters
+//! block on a condition variable, with a watchdog only for missing events.
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use std::ffi::OsStr;
 use std::io::{Read, Write};
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// How long a wait lasts before the test fails with the current screen.
 pub const WAIT: Duration = Duration::from_secs(20);
-/// How long the terminal must be quiet before a wait trusts the screen.
-pub const SETTLE: Duration = Duration::from_millis(30);
+
 /// Most rendered screens kept in the history.
 const MAX_FRAMES: usize = 20_000;
 const BEGIN_UPDATE: &[u8] = b"\x1b[?2026h";
@@ -38,8 +33,9 @@ struct Shared {
     frames: Vec<String>,
     /// A synchronized update has begun and not yet ended.
     in_update: bool,
-    /// When the last chunk of output arrived.
-    last_output: Instant,
+    /// Last completed update, retained while the next frame arrives.
+    last_frame: Option<Snapshot>,
+    ended: bool,
 }
 
 impl Shared {
@@ -71,19 +67,13 @@ impl Shared {
                 self.record_frame();
             }
         }
-        self.last_output = Instant::now();
     }
 
     fn record_frame(&mut self) {
+        self.last_frame = Some(Snapshot(self.parser.screen().clone()));
         if self.frames.len() < MAX_FRAMES {
             self.frames.push(self.parser.screen().contents());
         }
-    }
-
-    /// The screen, if no frame is half drawn and output has paused.
-    fn settled(&self) -> Option<Snapshot> {
-        (!self.in_update && self.last_output.elapsed() >= SETTLE)
-            .then(|| Snapshot(self.parser.screen().clone()))
     }
 }
 
@@ -109,6 +99,7 @@ pub struct Tui {
     writer: Box<dyn Write + Send>,
     child: Box<dyn Child + Send + Sync>,
     shared: Arc<Mutex<Shared>>,
+    changed: Arc<Condvar>,
     reader: Option<JoinHandle<()>>,
     /// Frames before this index are ignored by `wait_for_frame`.
     frame_cursor: usize,
@@ -138,15 +129,6 @@ impl Launch {
 
     pub fn arg(mut self, arg: impl AsRef<OsStr>) -> Self {
         self.command.arg(arg);
-        self
-    }
-
-    pub fn args<I, S>(mut self, args: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: AsRef<OsStr>,
-    {
-        self.command.args(args);
         self
     }
 
@@ -194,9 +176,12 @@ impl Launch {
             parser: vt100::Parser::new(self.rows, self.cols, 0),
             frames: Vec::new(),
             in_update: false,
-            last_output: Instant::now(),
+            last_frame: None,
+            ended: false,
         }));
         let sink = shared.clone();
+        let changed = Arc::new(Condvar::new());
+        let notify = changed.clone();
         let reader = std::thread::spawn(move || {
             let mut buffer = [0u8; 65_536];
             while let Ok(count) = reader.read(&mut buffer) {
@@ -206,13 +191,17 @@ impl Launch {
                 sink.lock()
                     .expect("terminal state")
                     .absorb(&buffer[..count]);
+                notify.notify_all();
             }
+            sink.lock().unwrap().ended = true;
+            notify.notify_all();
         });
         Tui {
             master: pair.master,
             writer,
             child,
             shared,
+            changed,
             reader: Some(reader),
             frame_cursor: 0,
             #[cfg(unix)]
@@ -226,13 +215,9 @@ impl Launch {
     /// every handle on the terminal's controlling side, as a terminal
     /// emulator does when it quits or a parent process that owns the
     /// pseudo-terminal exits. Returns the exit status if the binary ends
-    /// within `patience`, and `None` if it is still running.
+    /// after the child reports its exit.
     #[cfg(unix)]
-    pub fn spawn_and_hang_up(
-        self,
-        needle: &str,
-        patience: Duration,
-    ) -> Option<portable_pty::ExitStatus> {
+    pub fn spawn_and_hang_up(self, needle: &str) -> portable_pty::ExitStatus {
         let pair = native_pty_system()
             .openpty(PtySize {
                 rows: self.rows,
@@ -251,21 +236,14 @@ impl Launch {
         let fd = pair.master.as_raw_fd().expect("the terminal's descriptor");
         let mut reader = pair.master.try_clone_reader().expect("terminal reader");
         let mut seen = Vec::new();
-        let deadline = Instant::now() + WAIT;
         while !String::from_utf8_lossy(&seen).contains(needle) {
-            let left = deadline.saturating_duration_since(Instant::now());
-            assert!(
-                !left.is_zero(),
-                "{needle:?} never appeared:\n{}",
-                String::from_utf8_lossy(&seen)
-            );
             let mut fds = [libc::pollfd {
                 fd,
                 events: libc::POLLIN,
                 revents: 0,
             }];
             // SAFETY: `fds` is one initialised pollfd that outlives the call.
-            let ready = unsafe { libc::poll(fds.as_mut_ptr(), 1, left.as_millis() as libc::c_int) };
+            let ready = unsafe { libc::poll(fds.as_mut_ptr(), 1, -1) };
             if ready <= 0 {
                 continue;
             }
@@ -275,18 +253,7 @@ impl Launch {
         }
         drop(reader);
         drop(pair.master);
-        let deadline = Instant::now() + patience;
-        loop {
-            if let Some(status) = child.try_wait().expect("polling the binary") {
-                return Some(status);
-            }
-            if Instant::now() > deadline {
-                let _ = child.kill();
-                let _ = child.wait();
-                return None;
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        child.wait().expect("waiting for terminal hangup")
     }
 }
 
@@ -306,6 +273,7 @@ fn modes(master: &dyn MasterPty) -> Option<[libc::tcflag_t; 3]> {
 }
 
 /// A copy of the rendered screen at one moment.
+#[derive(Clone)]
 pub struct Snapshot(vt100::Screen);
 
 impl Snapshot {
@@ -341,14 +309,6 @@ impl Snapshot {
 
     pub fn contains(&self, needle: &str) -> bool {
         self.rows().iter().any(|row| row.contains(needle))
-    }
-
-    /// The first row that contains `needle`.
-    pub fn find(&self, needle: &str) -> Option<u16> {
-        self.rows()
-            .iter()
-            .position(|row| row.contains(needle))
-            .map(|row| row as u16)
     }
 
     /// The first row and column where `needle` starts.
@@ -428,40 +388,29 @@ impl Tui {
         self.frame_cursor = self.shared.lock().expect("terminal state").frames.len();
     }
 
-    /// Wait until a settled screen satisfies `test`, and return that screen.
+    /// Wait until a completed frame satisfies `test`, and return that screen.
     pub fn wait_for(&self, what: &str, test: impl Fn(&Snapshot) -> bool) -> Snapshot {
-        let deadline = Instant::now() + WAIT;
+        let mut shared = self.shared.lock().unwrap();
         loop {
-            let settled = self.shared.lock().expect("terminal state").settled();
-            if let Some(snapshot) = settled
-                && test(&snapshot)
+            if let Some(snapshot) = &shared.last_frame
+                && test(snapshot)
             {
-                return snapshot;
+                return snapshot.clone();
             }
-            if Instant::now() > deadline {
-                panic!("timed out waiting for {what}; screen:\n{}", self.snapshot());
-            }
-            std::thread::sleep(Duration::from_millis(5));
+            assert!(
+                !shared.ended,
+                "terminal ended before {what}: {}",
+                shared.parser.screen().contents()
+            );
+            let (next, timeout) = self.changed.wait_timeout(shared, WAIT).unwrap();
+            shared = next;
+            assert!(
+                !timeout.timed_out(),
+                "no terminal event for {what}: {}",
+                shared.parser.screen().contents()
+            );
         }
     }
-
-    /// Wait until the screen satisfies `test` at any moment, settled or not.
-    /// For tests that time or interrupt output while it is still arriving,
-    /// such as the launch animation.
-    pub fn wait_for_unsettled(&self, what: &str, test: impl Fn(&Snapshot) -> bool) -> Snapshot {
-        let deadline = Instant::now() + WAIT;
-        loop {
-            let snapshot = self.snapshot();
-            if test(&snapshot) {
-                return snapshot;
-            }
-            if Instant::now() > deadline {
-                panic!("timed out waiting for {what}; screen:\n{snapshot}");
-            }
-            std::thread::sleep(Duration::from_millis(5));
-        }
-    }
-
     /// Wait until the screen shows `needle`.
     pub fn wait_text(&self, needle: &str) -> Snapshot {
         self.wait_for(&format!("{needle:?}"), |screen| screen.contains(needle))
@@ -470,22 +419,22 @@ impl Tui {
     /// Wait until some screen rendered since the last mark satisfies `test`,
     /// so a transient state is not missed between polls. Returns that frame.
     pub fn wait_for_frame(&self, what: &str, test: impl Fn(&str) -> bool) -> String {
-        let deadline = Instant::now() + WAIT;
+        let mut shared = self.shared.lock().unwrap();
         loop {
-            if let Some(frame) = self
-                .frames_since_mark()
-                .into_iter()
+            if let Some(frame) = shared.frames[self.frame_cursor..]
+                .iter()
                 .find(|frame| test(frame))
             {
-                return frame;
+                return frame.clone();
             }
-            if Instant::now() > deadline {
-                panic!(
-                    "timed out waiting for a frame with {what}; screen:\n{}",
-                    self.snapshot()
-                );
-            }
-            std::thread::sleep(Duration::from_millis(10));
+            assert!(!shared.ended, "terminal ended before {what}");
+            let (next, timeout) = self.changed.wait_timeout(shared, WAIT).unwrap();
+            shared = next;
+            assert!(
+                !timeout.timed_out(),
+                "no terminal event for {what}: {}",
+                shared.parser.screen().contents()
+            );
         }
     }
 
@@ -515,10 +464,6 @@ impl Tui {
         self.send(b"\x03");
     }
 
-    pub fn down(&mut self) {
-        self.send(b"\x1b[B");
-    }
-
     pub fn resize(&mut self, rows: u16, cols: u16) {
         self.master
             .resize(PtySize {
@@ -538,24 +483,11 @@ impl Tui {
 
     /// Wait for the binary to exit, and return whether it succeeded.
     pub fn wait_exit(&mut self) -> bool {
-        match self.exit_within(Duration::from_secs(10)) {
-            Some(status) => status.success(),
-            None => panic!("the binary did not exit; screen:\n{}", self.snapshot()),
-        }
+        self.child.wait().expect("waiting for binary").success()
     }
 
-    /// The binary's exit status, if it ends within `patience`.
-    pub fn exit_within(&mut self, patience: Duration) -> Option<portable_pty::ExitStatus> {
-        let deadline = Instant::now() + patience;
-        loop {
-            if let Some(status) = self.child.try_wait().expect("polling the binary") {
-                return Some(status);
-            }
-            if Instant::now() > deadline {
-                return None;
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
+    pub fn exit_status(&mut self) -> portable_pty::ExitStatus {
+        self.child.wait().expect("waiting for binary")
     }
 
     /// Send the binary a signal, as `kill` would.

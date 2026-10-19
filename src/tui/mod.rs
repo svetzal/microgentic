@@ -42,7 +42,7 @@ use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use styled::{Palette, Role, Styled, wrap_chars};
 use thinking::Ending;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -83,7 +83,7 @@ impl Drop for Screen {
 
 struct ActiveRun {
     pid: Option<u32>,
-    started: Instant,
+    started: launch::Clock,
     cancelled: bool,
     result: JoinHandle<std::io::Result<Output>>,
     events: UnboundedReceiver<ConversationEvent>,
@@ -362,7 +362,7 @@ fn start_reply(view: &mut View, session: &mut Session, prompt: &str) -> Result<O
     let pid = child.id();
     Ok(Some(ActiveRun {
         pid,
-        started: Instant::now(),
+        started: launch::Clock::start(),
         cancelled: false,
         result: tokio::spawn(async move {
             let output = child.wait_with_output().await?;
@@ -542,7 +542,7 @@ pub async fn run(config: Option<PathBuf>) -> Result<()> {
     view.history.reset();
     let mut active: Option<ActiveRun> = None;
     let mut last_draw = None;
-    let spinner_epoch = Instant::now();
+    let spinner_epoch = launch::Clock::start();
     let (columns, lines) = terminal::size()?;
     let mut launch_started = launch::should_play(
         std::env::var_os("MICROGENTIC_NO_ANIMATION").as_deref(),
@@ -550,7 +550,7 @@ pub async fn run(config: Option<PathBuf>) -> Result<()> {
         columns,
         lines,
     )
-    .then(Instant::now);
+    .then(launch::Clock::start);
     let outcome: Result<()> = async {
         loop {
             if leaving.load(Ordering::Relaxed) {
@@ -607,7 +607,7 @@ pub async fn run(config: Option<PathBuf>) -> Result<()> {
                         } else {
                             &run.activity
                         },
-                        run.started.elapsed().as_secs()
+                        run.started.elapsed()?.as_secs()
                     ),
                 );
             }
@@ -618,13 +618,15 @@ pub async fn run(config: Option<PathBuf>) -> Result<()> {
             // an idle screen does not redraw.
             let animating =
                 view.history.has_running() || matches!(view.panel, Some(Panel::Loading(_)));
-            let frame = animating.then(|| {
-                (spinner_epoch.elapsed().as_millis() / SPINNER_FRAME.as_millis()) as usize
-            });
+            let frame = if animating {
+                Some((spinner_epoch.elapsed()?.as_millis() / SPINNER_FRAME.as_millis()) as usize)
+            } else { None };
             // The launch animation redraws at about 30 fps while it plays, then
             // the idle signature takes over again.
             let launch = launch_started
-                .map(|started| started.elapsed())
+                .as_ref()
+                .map(launch::Clock::elapsed)
+                .transpose()?
                 .filter(|elapsed| *elapsed < launch::duration());
             if launch.is_none() {
                 launch_started = None;
@@ -1018,7 +1020,7 @@ mod tests {
         let (_sender, events) = unbounded_channel();
         ActiveRun {
             pid: None,
-            started: Instant::now(),
+            started: launch::Clock::start(),
             cancelled: false,
             result: tokio::spawn(async { Err(std::io::Error::other("unused")) }),
             events,

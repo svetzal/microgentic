@@ -1,26 +1,33 @@
 //! End-to-end tests of the terminal interface, on a real pseudo-terminal.
-#![cfg(unix)]
+#![cfg(all(
+    unix,
+    feature = "termination-test-provider",
+    microgentic_termination_test_build
+))]
 
+#[path = "tui_support/mod.rs"]
 mod support;
 
-use std::time::Duration;
 use support::*;
 
-/// The resting screen with no provider: animation off, an unreachable host.
-fn open_idle(no_color: Option<&str>) -> (Workspace, Tui) {
+/// The resting screen with no provider configured and animation off.
+fn open_idle(no_color: Option<&str>) -> (Workspace, ScriptedGateway, Tui) {
     let workspace = Workspace::new();
+    let provider = ScriptedGateway::start(Wire::Omlx, |_| Reply::Status(500));
     let mut launch = Launch::new(microgentic())
         .arg("--config")
         .arg(&workspace.config)
         .cwd(&workspace.project)
         .size(24, 90)
-        .env("OMLX_HOST", "http://127.0.0.1:1")
         .env("MICROGENTIC_NO_ANIMATION", "1");
+    for (key, value) in provider.env() {
+        launch = launch.env(key, value);
+    }
     if let Some(value) = no_color {
         launch = launch.env("NO_COLOR", value);
     }
     let tui = launch.spawn();
-    (workspace, tui)
+    (workspace, provider, tui)
 }
 
 /// A crossterm foreground colour code in raw output; attributes are not colour.
@@ -30,7 +37,7 @@ fn has_colour_codes(raw: &[u8]) -> bool {
 
 #[test]
 fn tui_opens_without_a_provider_and_restores_the_terminal() {
-    let (_workspace, mut tui) = open_idle(None);
+    let (_workspace, provider, mut tui) = open_idle(None);
     let screen = tui.wait_text("Enter send");
     assert!(screen.contains("Talk to Microgentic."), "{screen}");
     let (row, col) = screen.locate("● Ready").expect("the ready status");
@@ -59,24 +66,30 @@ fn tui_opens_without_a_provider_and_restores_the_terminal() {
     // A small resize and Unicode input exercise layout without submitting work.
     tui.resize(5, 20);
     tui.paste("世界");
-    std::thread::sleep(std::time::Duration::from_millis(100));
+    let resized = tui.wait_text("世界");
+    assert_eq!(resized.rows().len(), 5);
+    assert!(resized.rows().iter().any(|row| row.contains("世界")));
+    assert!(provider.requests().is_empty());
+    assert!(provider.metadata().is_empty());
     tui.quit();
 }
 
 #[test]
 fn an_empty_no_color_keeps_colour() {
-    let (_workspace, mut tui) = open_idle(Some(""));
+    let (_workspace, provider, mut tui) = open_idle(Some(""));
     tui.wait_text("Enter send");
     assert!(
         has_colour_codes(&tui.raw()),
         "an empty NO_COLOR disabled colour"
     );
+    assert!(provider.requests().is_empty());
+    assert!(provider.metadata().is_empty());
     tui.quit();
 }
 
 #[test]
 fn no_color_removes_colour_but_keeps_labels_and_attributes() {
-    let (_workspace, mut tui) = open_idle(Some("1"));
+    let (_workspace, provider, mut tui) = open_idle(Some("1"));
     let screen = tui.wait_text("Enter send");
     assert!(
         !has_colour_codes(&tui.raw()),
@@ -88,15 +101,17 @@ fn no_color_removes_colour_but_keeps_labels_and_attributes() {
     let marker = screen.cell(row, col);
     assert_eq!(marker.fgcolor(), vt100::Color::Default);
     assert!(marker.bold(), "attributes remain without colour");
+    assert!(provider.requests().is_empty());
+    assert!(provider.metadata().is_empty());
     tui.quit();
 }
 
 // ---------------------------------------------------------------- sessions
 
-/// A TUI session against a mock provider in a fresh workspace.
+/// A TUI session against a scripted gateway in a fresh workspace.
 struct Session {
     workspace: Workspace,
-    provider: MockProvider,
+    provider: ScriptedGateway,
     tui: Tui,
 }
 
@@ -104,7 +119,7 @@ struct Session {
 fn open_session(
     binary: &str,
     workspace: Workspace,
-    provider: MockProvider,
+    provider: ScriptedGateway,
     rows: u16,
     cols: u16,
 ) -> Session {
@@ -120,7 +135,7 @@ fn open_session(
 fn launch_tui(
     binary: &str,
     workspace: &Workspace,
-    provider: &MockProvider,
+    provider: &ScriptedGateway,
     rows: u16,
     cols: u16,
 ) -> Tui {
@@ -133,6 +148,9 @@ fn launch_tui(
         .env("MICROGENTIC_NO_ANIMATION", "1")
         // Fixtures build inside their own project, not a shared Cargo target.
         .env_remove("CARGO_TARGET_DIR");
+    if workspace.base.join("clock").exists() {
+        launch = launch.env("MICROGENTIC_TUI_CLOCK", workspace.base.join("clock"));
+    }
     for (key, value) in provider.env() {
         launch = launch.env(key, value);
     }
@@ -180,7 +198,7 @@ fn dialogue(wire: Wire) {
     );
     workspace.write(".gitignore", "target/\n");
     std::fs::create_dir_all(workspace.project.join("src")).unwrap();
-    let provider = MockProvider::start(wire, |request| {
+    let provider = ScriptedGateway::start(wire, |request| {
         Reply::Stream(match request.number {
             1 => vec![content("Hello! What would you like to talk about?")],
             2 => vec![content("")],
@@ -345,14 +363,14 @@ fn tui_chats_naturally_and_can_perform_work_when_requested_ollama() {
 
 // ---------------------------------------------------------------- conversation
 
-/// The real TUI, stream transport and conversation, for one binary.
+/// The real executable, worker and native conversation for one binary.
 fn conversation(binary: &str, wire: Wire) {
     let workspace = Workspace::new();
     workspace.write("memo.txt", "Codename copperfern. Unicode 世界.\n");
     let (release_first, release_cancel) = (Gate::default(), Gate::default());
     let live = format!("FIRST-LIVE-{}-END", "x".repeat(150));
     let (first, cancel, chunk) = (release_first.clone(), release_cancel.clone(), live.clone());
-    let provider = MockProvider::start(wire, move |request| {
+    let provider = ScriptedGateway::start(wire, move |request| {
         Reply::Stream(match request.number {
             1 => vec![
                 thinking("Looking at the memo"),
@@ -410,6 +428,24 @@ fn conversation(binary: &str, wire: Wire) {
     let requests = session.provider.requests();
     assert_eq!(requests.len(), 3);
     let messages = requests[2]["messages"].as_array().unwrap();
+    let mut contract: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/tui_gateway.json")).unwrap();
+    assert_eq!(contract["version"], "microgentic_tui_gateway.v1");
+    let benchmark: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/benchmark_continuity.json")).unwrap();
+    let mut tools = benchmark["tools"].as_array().unwrap().clone();
+    tools.push(contract["calculate"].clone());
+    contract["request"]["tools"] = serde_json::json!(tools);
+    assert_eq!(
+        requests[0], contract["request"],
+        "complete initial gateway request"
+    );
+    let mut expected = contract["request"].clone();
+    expected["messages"] = contract["followup_messages"].clone();
+    assert_eq!(
+        requests[2], expected,
+        "complete followup request and native history"
+    );
     assert_eq!(messages[0]["role"], "system");
     assert_eq!(messages.iter().filter(|m| m["role"] == "system").count(), 1);
     assert!(messages.iter().any(|m| m["role"] == "user"
@@ -533,10 +569,13 @@ fn conversation(binary: &str, wire: Wire) {
     let requests = session.provider.requests();
     assert_eq!(requests[5]["messages"].as_array().unwrap().len(), 2);
     assert!(!requests[5]["messages"].to_string().contains("copperfern"));
-    let controls: &[&str] = match wire {
-        Wire::Omlx => &["temperature", "max_tokens"],
-        Wire::Ollama => &["options", "think"],
-    };
+    let controls = [
+        "completion",
+        "num_ctx",
+        "max_tokens",
+        "temperature",
+        "effort",
+    ];
     for control in controls {
         assert_eq!(requests[0][control], requests[5][control], "{control}");
     }
@@ -620,7 +659,7 @@ fn commands(wire: Wire) {
     workspace.write("AGENTS.md", "Run tests with make check.\n");
     let release_slow = Gate::default();
     let slow = release_slow.clone();
-    let provider = MockProvider::start(wire, move |request| {
+    let provider = ScriptedGateway::start(wire, move |request| {
         let mut steps = Vec::new();
         if request.last_message() == "Take your time." {
             // Hold the reply open so commands arrive while a run is active.
@@ -631,7 +670,7 @@ fn commands(wire: Wire) {
     });
     let mut session = open_session(microgentic(), workspace, provider, 40, 160);
     let saved_config = std::fs::read_to_string(&session.workspace.config).unwrap();
-    let effort = |request: &serde_json::Value| request[wire.effort_field()].clone();
+    let effort = |request: &serde_json::Value| request["effort"].as_str().unwrap().to_owned();
     let exchange = |session: &mut Session, prompt: &str| {
         let before = session.provider.request_count();
         session.exchange(prompt, &format!("REPLY-{}", before + 1));
@@ -662,6 +701,12 @@ fn commands(wire: Wire) {
         screen.contains(&format!("Choose a model from {}", wire.name()))
             && hint_row(screen).contains("Enter choose | Esc cancel")
     });
+    assert!(
+        session
+            .provider
+            .metadata()
+            .contains(&serde_json::json!({"operation":"models","model":null}))
+    );
     let (row, _) = picker
         .locate("› test-model (current)")
         .expect("the current model selected");
@@ -686,15 +731,13 @@ fn commands(wire: Wire) {
         "a command reached the provider"
     );
     assert_eq!(
-        session.provider.gets().len(),
-        1,
-        "{:?}",
-        session.provider.gets()
+        session.provider.metadata(),
+        vec![serde_json::json!({"operation":"models","model":null})]
     );
 
     let first = exchange(&mut session, "First message.");
     assert_eq!(first["model"], "test-model");
-    assert_eq!(effort(&first), "low");
+    assert_eq!(effort(&first), "Some(Low)");
     let follow = exchange(&mut session, "Second message.");
     assert!(
         follow["messages"].to_string().contains("First message."),
@@ -710,7 +753,7 @@ fn commands(wire: Wire) {
     session.tui.wait_text("🤖 other-model  🧠 low");
     let switched = exchange(&mut session, "After the model switch.");
     assert_eq!(switched["model"], "other-model");
-    assert_eq!(effort(&switched), "low");
+    assert_eq!(effort(&switched), "Some(Low)");
     assert!(
         !switched["messages"].to_string().contains("First message."),
         "history crossed a model change"
@@ -725,7 +768,7 @@ fn commands(wire: Wire) {
     session.tui.wait_text("🤖 other-model  🧠 high");
     let raised = exchange(&mut session, "After the effort change.");
     assert_eq!(raised["model"], "other-model");
-    assert_eq!(effort(&raised), "high");
+    assert_eq!(effort(&raised), "Some(High)");
     let kept = exchange(&mut session, "Still the same settings.");
     assert!(
         kept["messages"]
@@ -758,7 +801,7 @@ fn commands(wire: Wire) {
         .tui
         .wait_text("Effort set to model default for this session.");
     let unset = exchange(&mut session, "With the model default effort.");
-    assert!(effort(&unset).is_null(), "{unset}");
+    assert!(effort(&unset) == "None", "{unset}");
 
     let escaped = exchange(&mut session, "//etc/hosts is a path, not a command.");
     assert_eq!(
@@ -817,6 +860,42 @@ fn tui_slash_commands_stay_local_ollama() {
     commands(Wire::Ollama);
 }
 
+/// A failed independent listing must leave the session usable and never
+/// manufacture a model selection or a conversation request.
+#[test]
+fn tui_model_listing_errors_leave_the_conversation_usable_both_providers() {
+    for wire in [Wire::Omlx, Wire::Ollama] {
+        let provider = ScriptedGateway::replying(wire, vec![content("Still usable.")]);
+        provider.fail_listing("fixture listing unavailable");
+        let mut session = open_session(microgentic(), Workspace::new(), provider, 30, 180);
+        session.tui.submit("/model");
+        session.tui.wait_text(&format!(
+            "Could not list models from {}: LLM gateway error: fixture listing unavailable",
+            wire.name()
+        ));
+        assert!(session.provider.requests().is_empty());
+        assert_eq!(
+            session.provider.metadata(),
+            vec![serde_json::json!({"operation":"models", "model":null})]
+        );
+        session.exchange("Reply after listing error.", "Still usable.");
+        let request = session.provider.requests().pop().unwrap();
+        assert_eq!(request["model"], "test-model");
+        assert_eq!(
+            request["messages"].as_array().unwrap().last().unwrap(),
+            &serde_json::json!({"role":"user","content":"Reply after listing error."})
+        );
+        assert_eq!(
+            session.provider.metadata(),
+            vec![
+                serde_json::json!({"operation":"models", "model":null}),
+                serde_json::json!({"operation":"window", "model":"test-model"})
+            ]
+        );
+        session.tui.quit();
+    }
+}
+
 // ---------------------------------------------------------------- tool lines
 
 const SPINNER: [char; 10] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
@@ -832,7 +911,9 @@ fn running(frame: &str, call: &str) -> bool {
 fn tool_lines(wire: Wire) {
     let workspace = Workspace::new();
     workspace.write("notes.txt", "first line\nsecond line\nthird line\n");
-    let provider = MockProvider::turns(
+    let mut release = control_pipe(&workspace.project.join("tool-control"));
+    std::fs::write(workspace.base.join("clock"), "0").unwrap();
+    let provider = ScriptedGateway::turns(
         wire,
         vec![
             vec![
@@ -840,7 +921,7 @@ fn tool_lines(wire: Wire) {
                 tools(&[
                     (
                         "shell_command",
-                        serde_json::json!({"command": "sleep 1", "timeout_secs": 30}),
+                        serde_json::json!({"command": "read -r release < tool-control", "timeout_secs": 30}),
                     ),
                     (
                         "read_file",
@@ -861,9 +942,36 @@ fn tool_lines(wire: Wire) {
     );
     let mut session = open_session(microgentic(), workspace, provider, 36, 160);
     session.tui.mark_frames();
-    let finished = session.exchange("Check the notes.", "All done.");
+    session.tui.submit("Check the notes.");
+    let first = session.tui.wait_for_frame("both tools running", |frame| {
+        running(frame, "shell_command") && running(frame, "read_file notes.txt:1-2")
+    });
+    let first_glyph = *SPINNER
+        .iter()
+        .find(|glyph| first.contains(&format!("{glyph} shell_command")))
+        .unwrap();
+    std::fs::write(session.workspace.base.join("next-clock"), "100").unwrap();
+    std::fs::rename(
+        session.workspace.base.join("next-clock"),
+        session.workspace.base.join("clock"),
+    )
+    .unwrap();
+    session
+        .tui
+        .wait_for_frame("the injected spinner tick", |frame| {
+            running(frame, "shell_command")
+                && !frame.contains(&format!("{first_glyph} shell_command"))
+        });
+    use std::io::Write;
+    release.write_all(b"release\n").unwrap();
+    let finished = session.tui.wait_for("tool results and ready", |screen| {
+        screen.contains("All done.") && screen.contains(READY)
+    });
 
-    let (shell, read) = ("shell_command sleep 1", "read_file notes.txt:1-2");
+    let (shell, read) = (
+        "shell_command read -r release < tool-control",
+        "read_file notes.txt:1-2",
+    );
     let frames = session.tui.frames_since_mark();
     assert!(
         frames
@@ -883,7 +991,7 @@ fn tool_lines(wire: Wire) {
     assert!(glyphs.len() >= 2, "the spinner did not animate: {glyphs:?}");
 
     for line in [
-        "  ✓ shell_command sleep 1",
+        "  ✓ shell_command read -r release < tool-control",
         "  ✓ read_file notes.txt:1-2",
         "  ✗ read_file missing.txt",
         "  ✓ calculate 1474 / 1.1 = 1340",
@@ -953,7 +1061,7 @@ fn status_bar(wire: Wire, model: &str, in_git: bool) {
         workspace.write("tracked.txt", "two\n");
         workspace.write("new.txt", "untracked\n");
     }
-    let provider = MockProvider::start(wire, |request| {
+    let provider = ScriptedGateway::start(wire, |request| {
         Reply::Stream(vec![content(&format!("REPLY-{}", request.number))])
     });
     workspace.configure(wire.name(), model, Some("low"));
@@ -1070,43 +1178,52 @@ fn painted_frames(tui: &Tui) -> Vec<String> {
 
 /// Launch with the animation on and return the session and the seconds from
 /// the first painted frame to the resting screen.
-fn animated_launch(
-    provider: &MockProvider,
-    workspace: &Workspace,
-    key: Option<&[u8]>,
-) -> (Tui, f64) {
+fn animated_launch(provider: &ScriptedGateway, workspace: &Workspace, key: Option<&[u8]>) -> Tui {
     workspace.configure("omlx", "test-model", Some("low"));
+    std::fs::write(workspace.base.join("clock"), "0").unwrap();
     let mut launch = Launch::new(microgentic())
         .arg("--config")
         .arg(&workspace.config)
         .cwd(&workspace.project)
         .size(24, 90)
+        .env("MICROGENTIC_TUI_CLOCK", workspace.base.join("clock"))
         .env("XDG_STATE_HOME", &workspace.state)
         .env_remove("MICROGENTIC_NO_ANIMATION");
     for (name, value) in provider.env() {
         launch = launch.env(name, value);
     }
     let mut tui = launch.spawn();
-    // Time from the first painted frame: a freshly built binary can take a
-    // moment to start on macOS, which is not the animation's doing.
-    let painted = |tui: &Tui| String::from_utf8_lossy(&tui.raw()).contains("\x1b[2J");
-    tui.wait_for_unsettled("the first frame", |_| painted(&tui));
-    let first_frame = std::time::Instant::now();
+    tui.wait_text("·");
     if let Some(key) = key {
         tui.send(key);
+    } else {
+        for (ms, text) in [
+            (200, "•"),
+            (300, "✧"),
+            (400, "✦"),
+            (900, "microgentic"),
+            (2000, "Talk to Microgentic."),
+        ] {
+            std::fs::write(workspace.base.join("next-clock"), ms.to_string()).unwrap();
+            std::fs::rename(
+                workspace.base.join("next-clock"),
+                workspace.base.join("clock"),
+            )
+            .unwrap();
+            tui.wait_text(text);
+        }
     }
     tui.wait_for("the resting screen", |screen| {
         resting(&screen.text()) && (key.is_none() || screen.contains("> x"))
     });
-    (tui, first_frame.elapsed().as_secs_f64())
+    tui
 }
 
 #[test]
 fn tui_launch_animation_settles_on_the_resting_screen() {
     let workspace = Workspace::new();
-    let provider = MockProvider::start(Wire::Omlx, |_| Reply::Status(500));
-    let (mut tui, settled) = animated_launch(&provider, &workspace, None);
-    std::thread::sleep(std::time::Duration::from_millis(300));
+    let provider = ScriptedGateway::start(Wire::Omlx, |_| Reply::Status(500));
+    let mut tui = animated_launch(&provider, &workspace, None);
     let painted = painted_frames(&tui);
     assert!(
         painted.iter().any(|frame| frame.contains('✦')),
@@ -1125,19 +1242,17 @@ fn tui_launch_animation_settles_on_the_resting_screen() {
         resting(painted.last().unwrap()),
         "the last painted frame is not the resting screen"
     );
-    assert!(settled < 2.4, "the resting screen took {settled:.2}s");
     assert!(resting(&tui.snapshot().text()), "{}", tui.snapshot());
     tui.quit();
     assert_eq!(provider.request_count(), 0, "launch contacted the provider");
-    assert!(provider.gets().is_empty(), "launch listed models");
+    assert!(provider.metadata().is_empty(), "launch listed models");
 }
 
 #[test]
 fn tui_launch_animation_is_skipped_by_a_key_that_still_lands() {
     let workspace = Workspace::new();
-    let provider = MockProvider::start(Wire::Omlx, |_| Reply::Status(500));
-    let (mut tui, _) = animated_launch(&provider, &workspace, Some(b"x"));
-    std::thread::sleep(std::time::Duration::from_millis(300));
+    let provider = ScriptedGateway::start(Wire::Omlx, |_| Reply::Status(500));
+    let mut tui = animated_launch(&provider, &workspace, Some(b"x"));
     let frames = tui.frames_since_mark();
     let first_with_key = frames
         .iter()
@@ -1169,9 +1284,27 @@ fn tui_launch_animation_is_skipped_by_a_key_that_still_lands() {
         "> x",
         "the key is in the input line"
     );
+    std::fs::write(workspace.base.join("next-clock"), "2000").unwrap();
+    std::fs::rename(
+        workspace.base.join("next-clock"),
+        workspace.base.join("clock"),
+    )
+    .unwrap();
+    tui.send(b"y");
+    let later = tui.wait_text("> xy");
+    assert!(
+        resting(&later.text()),
+        "animation returned after the skipped key"
+    );
+    assert!(
+        tui.frames_since_mark()
+            .iter()
+            .filter(|frame| frame.contains("> xy"))
+            .all(|frame| resting(frame))
+    );
     tui.quit();
     assert_eq!(provider.request_count(), 0, "launch contacted the provider");
-    assert!(provider.gets().is_empty(), "launch listed models");
+    assert!(provider.metadata().is_empty(), "launch listed models");
 }
 
 // ---------------------------------------------------------------- live thinking
@@ -1191,7 +1324,7 @@ fn live_thinking(wire: Wire) {
     workspace.write("notes.txt", "PACE = 2.0\nsecond line\n");
     let thought_seen = Gate::default();
     let seen = thought_seen.clone();
-    let provider = MockProvider::start(wire, move |request| {
+    let provider = ScriptedGateway::start(wire, move |request| {
         Reply::Stream(match request.number {
             1 => vec![
                 thinking("\nThe user wants"),
@@ -1324,7 +1457,7 @@ fn word_wrap(wire: Wire) {
         .chunks(17)
         .map(|chunk| content(&chunk.iter().collect::<String>()))
         .collect();
-    let provider = MockProvider::turns(
+    let provider = ScriptedGateway::turns(
         wire,
         vec![
             vec![
@@ -1443,7 +1576,7 @@ fn context_panel(wire: Wire) {
     let workspace = Workspace::new();
     let release_tool_request = Gate::default();
     let held = release_tool_request.clone();
-    let provider = MockProvider::start(wire, move |request| {
+    let provider = ScriptedGateway::start(wire, move |request| {
         Reply::Stream(match request.number {
             1 => vec![content("REPLY-ONE")],
             2 => vec![content("REPLY-TWO")],
@@ -1583,7 +1716,7 @@ fn tui_context_panel_shows_the_latest_request_ollama() {
 fn discovered_window_and_residency(wire: Wire) {
     let workspace = Workspace::new();
     workspace.write("AGENTS.md", "ROOT-RULE: be brief.\n");
-    let provider = MockProvider::start(wire, |request| {
+    let provider = ScriptedGateway::start(wire, |request| {
         Reply::Stream(vec![content(&format!("REPLY-{}", request.number))])
     });
     provider.advertise_window(Some(100_000));
@@ -1620,13 +1753,9 @@ fn discovered_window_and_residency(wire: Wire) {
     assert!(panel_row(&rows, "Tools offered:").ends_with("· pinned"));
 
     session.exchange("Second message.", "REPLY-2");
-    let metadata_requests = match wire {
-        Wire::Omlx => session.provider.gets().len(),
-        Wire::Ollama => session.provider.shows().len(),
-    };
     assert_eq!(
-        metadata_requests, 1,
-        "the conversation asked for the window again"
+        session.provider.metadata(),
+        vec![serde_json::json!({"operation":"window", "model":"test-model"})]
     );
     let state = session.session_state();
     assert_eq!(state["context_window"]["tokens"], 100_000);
@@ -1652,15 +1781,17 @@ fn tui_shows_the_discovered_window_and_residency_ollama() {
 #[test]
 fn tui_ends_when_its_terminal_hangs_up() {
     let workspace = Workspace::new();
+    let provider = ScriptedGateway::start(Wire::Omlx, |_| Reply::Status(500));
     let status = Launch::new(microgentic())
         .arg("--config")
         .arg(&workspace.config)
         .cwd(&workspace.project)
         .size(24, 90)
-        .env("OMLX_HOST", "http://127.0.0.1:1")
         .env("MICROGENTIC_NO_ANIMATION", "1")
-        .spawn_and_hang_up("Enter send", Duration::from_secs(5))
-        .expect("the conversation did not end after its terminal closed");
+        .env("MICROGENTIC_TUI_SCRIPT", &provider.env()[0].1)
+        .spawn_and_hang_up("Enter send");
+    assert!(provider.requests().is_empty());
+    assert!(provider.metadata().is_empty());
     // The loop notices the hang-up and reports it; the forced exit after
     // SIGHUP (status 129) would mean it was spinning until then.
     assert_eq!(
@@ -1675,15 +1806,12 @@ fn tui_ends_when_its_terminal_hangs_up() {
 #[test]
 fn tui_ends_on_a_termination_signal_and_restores_the_terminal() {
     for signal in [libc::SIGTERM, libc::SIGHUP] {
-        let (_workspace, mut tui) = open_idle(None);
+        let (_workspace, provider, mut tui) = open_idle(None);
         tui.wait_text("Enter send");
+        assert!(provider.requests().is_empty());
+        assert!(provider.metadata().is_empty());
         tui.signal(signal);
-        let status = tui.exit_within(Duration::from_secs(3)).unwrap_or_else(|| {
-            panic!(
-                "signal {signal} did not end the conversation; screen:\n{}",
-                tui.snapshot()
-            )
-        });
+        let status = tui.exit_status();
         assert!(status.success(), "signal {signal} ended with an error");
         tui.assert_terminal_restored();
     }
@@ -1693,26 +1821,27 @@ fn tui_ends_on_a_termination_signal_and_restores_the_terminal() {
 /// then ends the conversation.
 #[test]
 fn tui_ends_on_sigterm_while_a_reply_streams() {
-    let hold = Gate::default();
-    let provider = MockProvider::replying(
-        Wire::Omlx,
-        vec![content("UNFINISHED-REPLY"), Step::Hold(hold.clone())],
-    );
-    let mut session = open_session(microgentic(), Workspace::new(), provider, 24, 90);
-    session
-        .tui
-        .submit("Start a request that will be interrupted.");
-    session.tui.wait_text("UNFINISHED-REPLY");
-    session.tui.signal(libc::SIGTERM);
-    session
-        .tui
-        .exit_within(Duration::from_secs(5))
-        .unwrap_or_else(|| {
-            panic!(
-                "SIGTERM did not end the conversation; screen:\n{}",
-                session.tui.snapshot()
-            )
-        });
-    session.tui.assert_terminal_restored();
-    hold.open();
+    for wire in [Wire::Omlx, Wire::Ollama] {
+        let hold = Gate::default();
+        let provider = ScriptedGateway::replying(
+            wire,
+            vec![content("UNFINISHED-REPLY"), Step::Hold(hold.clone())],
+        );
+        let mut session = open_session(microgentic(), Workspace::new(), provider, 24, 90);
+        session
+            .tui
+            .submit("Start a request that will be interrupted.");
+        session.tui.wait_text("UNFINISHED-REPLY");
+        session.tui.signal(libc::SIGTERM);
+        let status = session.tui.exit_status();
+        assert!(
+            status.success(),
+            "termination while streaming failed: {status:?}"
+        );
+        session.tui.assert_terminal_restored();
+        let saved = session.session_state();
+        assert!(!saved["last_error"].is_null());
+        assert!(!saved["messages"].to_string().contains("UNFINISHED-REPLY"));
+        hold.open();
+    }
 }
