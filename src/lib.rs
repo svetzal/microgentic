@@ -33,3 +33,10 @@ mod tui;
 
 #[cfg(test)]
 mod outcome_test_io;
+
+#[cfg(all(
+    feature = "termination-test-provider",
+    microgentic_termination_test_build,
+    unix
+))]
+mod termination_test_provider;

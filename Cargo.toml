@@ -20,6 +20,10 @@ path = "src/main.rs"
 name = "adaptive-agent-harness"
 path = "src/bin/legacy.rs"
 
+[features]
+# Real-process termination tests only; excluded from release-profile binaries.
+termination-test-provider = []
+
 [dependencies]
 anyhow = "1.0"
 async-trait = "0.1"

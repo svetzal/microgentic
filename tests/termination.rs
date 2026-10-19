@@ -1,257 +1,196 @@
-//! `microgentic run` ends on a termination signal. The model request is
-//! cancelled, a project command that is still running is killed with its
-//! process group, and the process exits with the shell's status for that
-//! signal (128 + its number) instead of waiting for work that nothing will
-//! finish.
-#![cfg(unix)]
+//! Real CLI signal dispatch with a socket-free gateway and pipe handshakes.
+#![cfg(all(
+    unix,
+    feature = "termination-test-provider",
+    microgentic_termination_test_build
+))]
 
-mod support;
-
-use serde_json::json;
+#[path = "support/fixtures.rs"]
+#[allow(dead_code)]
+mod fixtures;
+use fixtures::Workspace;
+use std::fs::{File, OpenOptions};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, ExitStatus, Stdio};
-use std::time::{Duration, Instant};
-use support::*;
 
-/// Start an everyday run with `prompt` and leave it running.
-fn start_run(provider: &MockProvider, workspace: &Workspace, prompt: &str) -> Child {
-    run_command(provider, workspace, prompt)
-        .spawn()
-        .expect("starting the run")
+struct Run {
+    child: Child,
+    events: BufReader<File>,
+    control: File,
+    workspace: Workspace,
 }
 
-fn run_command(provider: &MockProvider, workspace: &Workspace, prompt: &str) -> Command {
-    let mut command = Command::new(microgentic());
-    command
-        .arg("--config")
-        .arg(&workspace.config)
-        .args([
-            "run",
-            "--provider",
-            provider.wire().name(),
-            "--model",
-            "test-model",
-            "--prompt",
-            prompt,
-        ])
-        .current_dir(&workspace.project)
-        .env_remove("NO_COLOR")
-        .env("XDG_STATE_HOME", &workspace.state)
-        .env("XDG_CONFIG_HOME", workspace.base.join("config"))
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    for (key, value) in provider.env() {
-        command.env(key, value);
-    }
-    command
-}
-
-/// Wait up to ten seconds for `test` to hold.
-fn wait_until(what: &str, test: impl Fn() -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while !test() {
-        assert!(Instant::now() < deadline, "{what} did not happen in time");
-        std::thread::sleep(Duration::from_millis(20));
-    }
-}
-
-fn signal(child: &Child, signal: i32) {
-    // SAFETY: kill(2) takes a pid and a signal number and touches no memory.
-    let sent = unsafe { libc::kill(child.id() as libc::pid_t, signal) };
-    assert_eq!(
-        sent,
-        0,
-        "signalling the run: {}",
-        std::io::Error::last_os_error()
-    );
-}
-
-/// The run's exit status, if it ends within `patience`.
-fn exit_within(child: &mut Child, patience: Duration) -> Option<ExitStatus> {
-    let deadline = Instant::now() + patience;
-    loop {
-        if let Some(status) = child.try_wait().expect("polling the run") {
-            return Some(status);
+impl Run {
+    fn start(provider: &str, ignore_hup: bool, project_command: &str) -> Self {
+        let workspace = Workspace::new();
+        for name in ["events", "control", "command-events", "command-control"] {
+            assert!(
+                Command::new("mkfifo")
+                    .arg(workspace.base.join(name))
+                    .status()
+                    .unwrap()
+                    .success()
+            );
         }
-        if Instant::now() > deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            return None;
+        std::fs::write(workspace.base.join("command"), project_command).unwrap();
+        let control = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(workspace.base.join("control"))
+            .unwrap();
+        let mut command = Command::new(env!("CARGO_BIN_EXE_microgentic"));
+        command
+            .arg("--config")
+            .arg(&workspace.config)
+            .args([
+                "run",
+                "--provider",
+                provider,
+                "--model",
+                "test-model",
+                "--context-window-tokens",
+                "32768",
+                "--prompt",
+                "Run the requested work.",
+            ])
+            .current_dir(&workspace.project)
+            .env("MICROGENTIC_TERMINATION_SCRIPT", &workspace.base)
+            .env("XDG_STATE_HOME", &workspace.state)
+            .env("XDG_CONFIG_HOME", workspace.base.join("config"))
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped());
+        if ignore_hup {
+            // SAFETY: only the child's disposition table is changed before
+            // exec, as nohup does; signal performs no allocation.
+            unsafe {
+                command.pre_exec(|| {
+                    libc::signal(libc::SIGHUP, libc::SIG_IGN);
+                    Ok(())
+                });
+            }
         }
-        std::thread::sleep(Duration::from_millis(10));
+        let child = command.spawn().unwrap();
+        let events = BufReader::new(File::open(workspace.base.join("events")).unwrap());
+        Self {
+            child,
+            events,
+            control,
+            workspace,
+        }
+    }
+
+    fn event(&mut self, expected: &str) {
+        let mut line = String::new();
+        assert_ne!(
+            self.events.read_line(&mut line).unwrap(),
+            0,
+            "run ended before {expected}"
+        );
+        assert_eq!(line.trim(), expected);
+    }
+
+    fn signal(&self, signal: i32) {
+        // SAFETY: the child owns this live pid; kill touches no memory.
+        assert_eq!(unsafe { libc::kill(self.child.id() as i32, signal) }, 0);
+    }
+
+    fn stop(&mut self, signal: i32) -> (ExitStatus, String) {
+        self.signal(signal);
+        let status = self.child.wait().unwrap();
+        let mut stderr = String::new();
+        self.child
+            .stderr
+            .take()
+            .unwrap()
+            .read_to_string(&mut stderr)
+            .unwrap();
+        (status, stderr)
     }
 }
 
-fn stderr_of(child: Child) -> String {
-    let output = child
-        .wait_with_output()
-        .expect("collecting the run's output");
-    String::from_utf8_lossy(&output.stderr).into_owned()
+#[test]
+fn run_started_under_nohup_keeps_ignoring_sighup() {
+    let mut run = Run::start("omlx", true, "");
+    run.event("stream-ready");
+    run.signal(libc::SIGHUP);
+    run.control.write_all(b"+").unwrap();
+    run.event("stream-advanced");
+    let result = run.stop(libc::SIGTERM);
+    assert_cancelled(result, libc::SIGTERM, "SIGTERM");
 }
 
-/// Processes whose command line carries `marker`.
-fn processes_marked(marker: &str) -> Vec<String> {
-    let output = Command::new("pgrep")
-        .args(["-f", marker])
-        .output()
-        .expect("running pgrep");
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .map(str::to_owned)
-        .collect()
-}
-
-fn run_stops_while_the_model_is_answering(wire: Wire, signal_number: i32) {
-    let workspace = Workspace::new();
-    let hold = Gate::default();
-    let provider = MockProvider::replying(
-        wire,
-        vec![content("The reply begins"), Step::Hold(hold.clone())],
-    );
-    let mut child = start_run(&provider, &workspace, "Say something long.");
-    wait_until("the model request", || provider.request_count() >= 1);
-    signal(&child, signal_number);
-    let status = exit_within(&mut child, Duration::from_secs(3))
-        .unwrap_or_else(|| panic!("signal {signal_number} did not end the run"));
-    hold.open();
-    let stderr = stderr_of(child);
-    assert_eq!(status.code(), Some(128 + signal_number), "{stderr}");
-    let name = match signal_number {
-        libc::SIGTERM => "SIGTERM",
-        libc::SIGHUP => "SIGHUP",
-        _ => "SIGINT",
-    };
+// A surviving descendant reports itself after CLI completion. This release
+// handshake makes a missing group kill fail without polling or a timeout.
+fn command_cancellation(provider: &str) {
+    let command = r#"exec 3>"$MICROGENTIC_TERMINATION_SCRIPT/command-events"
+sh -c 'printf "descendant-started\n" >&3
+read -r release < "$MICROGENTIC_TERMINATION_SCRIPT/command-control"
+printf "survived\n" >&3' &
+wait"#;
+    let mut run = Run::start(provider, false, command);
+    let command_control = run.workspace.base.join("command-control");
+    let mut release = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(command_control)
+        .unwrap();
+    let mut events = BufReader::new(File::open(run.workspace.base.join("command-events")).unwrap());
+    let mut line = String::new();
+    events.read_line(&mut line).unwrap();
+    assert_eq!(line, "descendant-started\n");
+    let result = run.stop(libc::SIGTERM);
+    release.write_all(b"release\n").unwrap();
+    let mut remaining = String::new();
+    events.read_to_string(&mut remaining).unwrap();
     assert!(
-        stderr.contains(&format!("cancelled by {name}")),
-        "the run did not report its cancellation: {stderr}"
+        remaining.is_empty(),
+        "a project process survived cancellation: {remaining}"
     );
-}
-
-#[test]
-fn run_stops_on_sigterm_while_the_model_is_answering_omlx() {
-    run_stops_while_the_model_is_answering(Wire::Omlx, libc::SIGTERM);
-}
-
-#[test]
-fn run_stops_on_sigterm_while_the_model_is_answering_ollama() {
-    run_stops_while_the_model_is_answering(Wire::Ollama, libc::SIGTERM);
-}
-
-#[test]
-fn run_stops_on_sighup_while_the_model_is_answering() {
-    run_stops_while_the_model_is_answering(Wire::Omlx, libc::SIGHUP);
-}
-
-/// A project command the model started is killed with the run, process
-/// group and all, rather than left to run out its timeout.
-fn run_stops_while_a_command_runs(wire: Wire) {
-    let workspace = Workspace::new();
-    let marker = format!("mg-termination-{}-{}", std::process::id(), wire.name());
-    let command_marker = marker.clone();
-    let provider = MockProvider::start(wire, move |request| {
-        Reply::Stream(match request.number {
-            1 => vec![
-                content("I will run it."),
-                // The marker rides in the interpreter's own arguments, where
-                // pgrep sees it; a shell comment would vanish when the shell
-                // execs its last command.
-                tool(
-                    "shell_command",
-                    json!({"command": format!(
-                        "python3 -c 'import time; time.sleep(30)  # {command_marker}'"
-                    )}),
-                ),
-            ],
-            _ => vec![content("Done.")],
-        })
-    });
-    let mut child = start_run(&provider, &workspace, "Run the long command.");
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while processes_marked(&marker).is_empty() {
-        if let Some(status) = child.try_wait().expect("polling the run") {
-            panic!(
-                "the run ended ({status}) before its command started: {}",
-                stderr_of(child)
-            );
-        }
-        if Instant::now() > deadline {
-            let traces = workspace
-                .traces()
-                .iter()
-                .map(|path| std::fs::read_to_string(path).unwrap_or_default())
-                .collect::<Vec<_>>()
-                .join("\n");
-            let processes = Command::new("ps").args(["-ef"]).output().expect("ps");
-            panic!(
-                "the command did not start in time; shell events:\n{}\nprocesses:\n{}",
-                traces
-                    .lines()
-                    .filter(|line| line.contains("shell"))
-                    .collect::<Vec<_>>()
-                    .join("\n"),
-                String::from_utf8_lossy(&processes.stdout)
-                    .lines()
-                    .filter(|line| line.contains("sleep"))
-                    .collect::<Vec<_>>()
-                    .join("\n"),
-            );
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    signal(&child, libc::SIGTERM);
-    let status = exit_within(&mut child, Duration::from_secs(3))
-        .expect("SIGTERM did not end the run while its command ran");
-    let stderr = stderr_of(child);
-    assert!(!status.success(), "{stderr}");
-    wait_until("the command to be killed", || {
-        processes_marked(&marker).is_empty()
-    });
+    assert_cancelled(result, libc::SIGTERM, "SIGTERM");
 }
 
 #[test]
 fn run_stops_on_sigterm_while_a_command_runs_omlx() {
-    run_stops_while_a_command_runs(Wire::Omlx);
+    command_cancellation("omlx");
+}
+
+fn assert_cancelled((status, stderr): (ExitStatus, String), signal: i32, name: &str) {
+    assert_eq!(status.code(), Some(128 + signal), "{stderr}");
+    assert!(stderr.contains(&format!("cancelled by {name}")), "{stderr}");
+}
+
+impl Drop for Run {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+fn model_cancellation(provider: &str, signal: i32, name: &str) {
+    let mut run = Run::start(provider, false, "");
+    run.event("stream-ready");
+    let result = run.stop(signal);
+    assert_cancelled(result, signal, name);
+}
+
+#[test]
+fn run_stops_on_sigterm_while_the_model_is_answering_omlx() {
+    model_cancellation("omlx", libc::SIGTERM, "SIGTERM");
+}
+
+#[test]
+fn run_stops_on_sigterm_while_the_model_is_answering_ollama() {
+    model_cancellation("ollama", libc::SIGTERM, "SIGTERM");
+}
+
+#[test]
+fn run_stops_on_sighup_while_the_model_is_answering() {
+    model_cancellation("omlx", libc::SIGHUP, "SIGHUP");
 }
 
 #[test]
 fn run_stops_on_sigterm_while_a_command_runs_ollama() {
-    run_stops_while_a_command_runs(Wire::Ollama);
-}
-
-/// A run started with SIGHUP ignored, as `nohup` does, keeps ignoring it
-/// and still ends on SIGTERM.
-#[test]
-fn run_started_under_nohup_keeps_ignoring_sighup() {
-    let workspace = Workspace::new();
-    let hold = Gate::default();
-    let provider = MockProvider::replying(
-        Wire::Omlx,
-        vec![content("The reply begins"), Step::Hold(hold.clone())],
-    );
-    let mut command = run_command(&provider, &workspace, "Say something long.");
-    // SAFETY: signal(2) only changes this child's disposition table, which
-    // is what nohup does before exec; nothing is allocated or shared.
-    unsafe {
-        command.pre_exec(|| {
-            libc::signal(libc::SIGHUP, libc::SIG_IGN);
-            Ok(())
-        });
-    }
-    let mut child = command.spawn().expect("starting the run");
-    wait_until("the model request", || provider.request_count() >= 1);
-    signal(&child, libc::SIGHUP);
-    let watched = Instant::now() + Duration::from_secs(1);
-    while Instant::now() < watched {
-        assert!(
-            child.try_wait().expect("polling the run").is_none(),
-            "SIGHUP ended a run that was started with it ignored"
-        );
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    signal(&child, libc::SIGTERM);
-    let status =
-        exit_within(&mut child, Duration::from_secs(3)).expect("SIGTERM did not end the run");
-    hold.open();
-    assert_eq!(status.code(), Some(143), "{}", stderr_of(child));
+    command_cancellation("ollama");
 }
