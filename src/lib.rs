@@ -47,3 +47,9 @@ mod termination_test_provider;
     unix
 ))]
 mod tui_test_provider;
+
+#[cfg(test)]
+mod recovery_test_io;
+
+#[cfg(test)]
+mod test_clock;

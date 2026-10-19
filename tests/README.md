@@ -1,5 +1,174 @@
 # CLI and terminal coverage
 
+## Recovery caller boundary and worker characterization
+
+Stacey's revised 2026-10-19 boundary supersedes the earlier retirement of
+Microgentic's recovery consumption. `src/recovery_test_io.rs` calls public
+`agent::run_agent`, through its shared settings validation, completion controls,
+actual `WorkerGateway`, tool dispatch, trace binding and evidence settlement.
+The task-local gateway and clock exist only under `cfg(test)`. This path does
+not use the older `outcome_test_io` early return. The private completion adapter
+passes production calls straight to Mojentic's existing recovery gateway;
+policy construction is shared, including the actual operator-admission callback.
+No public API, provider contract, runtime, dependency, feature or stop policy changes.
+
+The double emits Mojentic 3.0.1 lifecycle-bearing completions and wire-observer
+inputs in process. It never opens a connection or decodes provider HTTP. Opaque
+`Failure` fixtures start from a rejected request preparation (no transport call),
+then specify public metadata. This is consumer fixture construction, not a
+Mojentic transport seam or provider verification. The registered harnesses in
+`fixtures/recovery/` and `fixtures/progress/` remain unchanged and are no longer
+invoked by repository tests; `tests/recovery_worker.rs` is removed.
+
+Focused command: `cargo test --locked --lib recovery_test_io`.
+All R labels below name tests in that module:
+
+| Label | Test suffix after `public_run_` |
+| --- | --- |
+| R1 | `rejects_fragmented_credentials_before_tool_execution` |
+| R2 | `retains_complete_lifecycle_identity_and_exact_capture_without_optional_metrics` |
+| R3 | `capture_failure_rejects_completed_tools` |
+| R4 | `dropped_reasoning_stream_retains_ordered_cancellation_and_capture` |
+| R5 | `settlement_uses_exactly_five_seconds_of_injected_time` |
+| R6 | `propagates_all_terminal_outcomes_with_full_failure_payloads_both_providers` |
+| R7 | `tool_fragments_are_not_executed_and_completed_tool_executes_once` |
+| R8 | `filters_credentials_in_every_semantic_and_tool_fragment_channel` |
+| R9 | `admission_binds_full_failure_digest_and_attempt_identity` |
+| R10 | `validates_every_recovery_setting_before_dispatch_or_trace_creation` |
+| R11 | `wire_credentials_are_redacted_in_exactly_identified_captures` |
+| R12 | `retains_retry_identities_ordered_lifecycle_metrics_and_both_capture_bodies` |
+| R13 | `safe_prefix_mismatch_and_empty_fragments_preserve_visible_bytes` |
+| R14 | `failure_without_identity_uses_history_for_settlement_and_retains_absent_evidence` |
+| R15 | `preserves_permanent_status_and_partial_output_failure_evidence` |
+| R16 | `safe_tool_key_boundaries_keep_truncated_fragments_inert` |
+| R17 | `pending_admission_expires_on_injected_time_without_replaying` |
+| R18 | `cancellation_before_terminal_delivery_prevents_completed_tool_execution` |
+
+The following inventory characterizes every `CASES` entry, including expansion
+of `CREDENTIAL_REGRESSIONS`, `BOUNDARY_CREDENTIALS` and `BOUNDARY_CONTROLS`.
+The original runs each case for both provider HTTP adapters. The replacement
+checks shared Microgentic consumption; R6 also selects each provider explicitly.
+Provider-specific parsing, retry policy and remote behavior are explicitly
+retired here, not proved by the consumer double.
+
+| Former `worker_conformance.py` case | Replacement evidence | Ownership/disposition |
+| --- | --- | --- |
+| `503_success` | R12; R9 | Exact ordered lifecycle, distinct attempt identities, stable logical identity, two captured bodies and metrics retained. HTTP resend policy and identical provider-encoded retry requests retired. |
+| `disabled` | R6; R10; R7 | Default no-recovery settings, exhausted error, no capture and actual tool journey retained; provider one-attempt dispatch policy retired. |
+| `one_attempt_capture` | R2; R6 | Capture with recovery disabled, exact metadata/bodies, absent optional metrics and exhausted error retained; HTTP attempt selection retired. |
+| `persistent504` | R6; R12 | Exhausted typed error and multi-attempt identity/accounting/capture retained; selection of three HTTP attempts and retry history construction retired. |
+| `reject` | R9; R6 | Actual Microgentic operator callback rejects proof; full input/digest and typed admission-rejected error retained. |
+| `plain_allow` | R9 | Unbound allow proof rejected by actual operator callback; exact callback input retained. |
+| `wrong_digest` | R9 | Incorrect request digest rejected by actual operator callback; exact callback input retained. |
+| `pending` | R17; R6 | Actual operator callback remains pending on FIFO; injected five-second timeout rejects, with no replay. Provider admission scheduling retired. |
+| `no_admission` | R6 | Absent admission settings and full admission-required error retained; provider requirement classification retired. |
+| `retry_seconds_inside` | R12; R6 | Full delay/retry lifecycle and terminal delay-ceiling/budget errors retained. Parsing Retry-After seconds/dates, eligibility and scheduling belong to Mojentic; retired here. |
+| `retry_date_inside` | R12; R6 | Full delay/retry lifecycle and terminal delay-ceiling/budget errors retained. Parsing Retry-After seconds/dates, eligibility and scheduling belong to Mojentic; retired here. |
+| `retry_seconds_outside_ceiling` | R12; R6 | Full delay/retry lifecycle and terminal delay-ceiling/budget errors retained. Parsing Retry-After seconds/dates, eligibility and scheduling belong to Mojentic; retired here. |
+| `retry_date_outside_ceiling` | R12; R6 | Full delay/retry lifecycle and terminal delay-ceiling/budget errors retained. Parsing Retry-After seconds/dates, eligibility and scheduling belong to Mojentic; retired here. |
+| `retry_seconds_outside_budget` | R12; R6 | Full delay/retry lifecycle and terminal delay-ceiling/budget errors retained. Parsing Retry-After seconds/dates, eligibility and scheduling belong to Mojentic; retired here. |
+| `retry_date_outside_budget` | R12; R6 | Full delay/retry lifecycle and terminal delay-ceiling/budget errors retained. Parsing Retry-After seconds/dates, eligibility and scheduling belong to Mojentic; retired here. |
+| `cancel_request` | R4; R6; R18; executable `termination` tests | Ordered failed/cancelled payloads on stream drop, cancellation token before terminal tools, settlement and process signals retained. HTTP request/admission/backoff/terminal-body cancellation checkpoint selection belongs to Mojentic; retired here. |
+| `cancel_admission` | R4; R6; R18; executable `termination` tests | Ordered failed/cancelled payloads on stream drop, cancellation token before terminal tools, settlement and process signals retained. HTTP request/admission/backoff/terminal-body cancellation checkpoint selection belongs to Mojentic; retired here. |
+| `cancel_backoff` | R4; R6; R18; executable `termination` tests | Ordered failed/cancelled payloads on stream drop, cancellation token before terminal tools, settlement and process signals retained. HTTP request/admission/backoff/terminal-body cancellation checkpoint selection belongs to Mojentic; retired here. |
+| `cancel_terminal` | R4; R6; R18; executable `termination` tests | Ordered failed/cancelled payloads on stream drop, cancellation token before terminal tools, settlement and process signals retained. HTTP request/admission/backoff/terminal-body cancellation checkpoint selection belongs to Mojentic; retired here. |
+| `cancel_terminal_body` | R4; R6; R18; executable `termination` tests | Ordered failed/cancelled payloads on stream drop, cancellation token before terminal tools, settlement and process signals retained. HTTP request/admission/backoff/terminal-body cancellation checkpoint selection belongs to Mojentic; retired here. |
+| `partial_reasoning` | R4; R6; R15; R16 | Partial text/progress and interrupted error retention; incomplete tools remain inert. Provider partial-frame decoding and interruption classification retired. |
+| `partial_content` | R4; R6; R15; R16 | Partial text/progress and interrupted error retention; incomplete tools remain inert. Provider partial-frame decoding and interruption classification retired. |
+| `partial_tool` | R4; R6; R15; R16 | Partial text/progress and interrupted error retention; incomplete tools remain inert. Provider partial-frame decoding and interruption classification retired. |
+| `keepalive` | R12; `cli::recovery_prerequisites` | Ordered normalized progress/metrics, no invented semantic progress and exact terminal accounting retained. Parsing provider keepalive frames retired. |
+| `protocol` | R6; R15 | Typed failure propagation, optional evidence and partial output retained; malformed provider frame decoding/classification retired. |
+| `permanent_400` | R15; R6 | Exact status, permanent classification, partial-output progress, typed failure and rendered partial text retained. HTTP status/framing/truncation classification retired. |
+| `permanent_401` | R15; R6 | Exact status, permanent classification, partial-output progress, typed failure and rendered partial text retained. HTTP status/framing/truncation classification retired. |
+| `permanent_403` | R15; R6 | Exact status, permanent classification, partial-output progress, typed failure and rendered partial text retained. HTTP status/framing/truncation classification retired. |
+| `permanent_400_truncated` | R15; R6 | Exact status, permanent classification, partial-output progress, typed failure and rendered partial text retained. HTTP status/framing/truncation classification retired. |
+| `permanent_401_truncated` | R15; R6 | Exact status, permanent classification, partial-output progress, typed failure and rendered partial text retained. HTTP status/framing/truncation classification retired. |
+| `permanent_403_truncated` | R15; R6 | Exact status, permanent classification, partial-output progress, typed failure and rendered partial text retained. HTTP status/framing/truncation classification retired. |
+| `credential_header` | R9 | Actual wire observer marks echoed header as identifying metadata redacted; operator callback is not launched. HTTP authentication/header validation belongs to Mojentic. |
+| `credential_raw` | R11 | Fragmented raw bytes rejected and capture replaced by exact credential-withheld bytes and metadata; no completed tool execution. |
+| `credential_semantic` | R1; R8 | Cross-fragment and cross-channel credentials reject public run before completed tools; trace and reconstructed renderer text remain safe. |
+| `credential_error` | R11; R6 | Credential-bearing error body withheld; safe typed error serialized. Provider error-body classification is retired. |
+| `capture_failure` | R3 | Destination becomes unwritable after accepted wire evidence; actual finish/settlement rejects completion, persists observer-failed outcome and blocks tools. |
+| `tool_once` | R7; R12 | Actual shell marker equals exactly one execution; partial fragments never dispatch; literal call ID and complete assistant tool call preserved in follow-up request. HTTP retry placement retired. |
+| `stream_drop_cap` | R4; R5 | Actual reasoning cap drops gateway stream; full ordered failed/cancelled lifecycle, exact capture, progress and next-turn completion retained. Missing terminal evidence rejects after exactly five injected seconds. |
+| `empty_content_prefix_control` | R13 | Empty content fragments and prefix mismatch preserve exact visible text without contamination or retry. |
+| `credential_reasoning_interleaved` | R8; R1; R11 | Gateway fragments, completed tools and renderer privacy retained; provider SSE/NDJSON decoding retired. |
+| `credential_content_interleaved` | R8; R1; R11 | Gateway fragments, completed tools and renderer privacy retained; provider SSE/NDJSON decoding retired. |
+| `credential_tool_arguments` | R8; R1; R11 | Gateway fragments, completed tools and renderer privacy retained; provider SSE/NDJSON decoding retired. |
+| `credential_tool_name` | R8; R1; R11 | Gateway fragments, completed tools and renderer privacy retained; provider SSE/NDJSON decoding retired. |
+| `credential_tool_id` | R8; R1; R11 | Gateway fragments, completed tools and renderer privacy retained; provider SSE/NDJSON decoding retired. |
+| `credential_tool_completed` | R8; R1; R11 | Gateway fragments, completed tools and renderer privacy retained; provider SSE/NDJSON decoding retired. |
+| `credential_tool_escaped` | R8; R1; R11 | Gateway fragments, completed tools and renderer privacy retained; provider SSE/NDJSON decoding retired. |
+| `credential_tool_mixed` | R8; R1; R11 | Gateway fragments, completed tools and renderer privacy retained; provider SSE/NDJSON decoding retired. |
+| `credential_tool_key_boundary_truncated` | R8; R1; R11 | Gateway fragments, completed tools and renderer privacy retained; provider SSE/NDJSON decoding retired. |
+| `credential_tool_key_boundary_completed` | R8; R1; R11 | Gateway fragments, completed tools and renderer privacy retained; provider SSE/NDJSON decoding retired. |
+| `credential_tool_key_boundary_escape_tail` | R8; R1; R11 | Gateway fragments, completed tools and renderer privacy retained; provider SSE/NDJSON decoding retired. |
+| `tool_key_boundary_control_truncated` | R16; R7 | Safe key-boundary fragments remain inert; completed tool executes once. Provider completion-marker/parser classification retired. |
+| `tool_key_boundary_control_completed` | R16; R7 | Safe key-boundary fragments remain inert; completed tool executes once. Provider completion-marker/parser classification retired. |
+
+`validate_cli` scenarios `disabled_tuning`, `zero_attempts`, `zero_budget`,
+`delay_order`, `tool_admission`, `tool_capture` and `parent_capture` map one for
+one to R10: exact diagnostic, empty gateway requests and no trace creation.
+`tests/microgentic_cli.rs::recovery_help_explains_wire_attempts_and_examples`
+retains executable help success, empty stderr, Wire attempts and Examples.
+
+The original assertions after `run_case` dispatch are characterized as follows:
+
+| Meaningful original assertion family | Replacement or explicit retirement |
+| --- | --- |
+| No server-handler failures; exact POST route, HTTP body length/authentication; worker SHA and sanitized child environment | Mojentic/OS harness diagnostics retired. No network or old-binary equivalence is claimed. |
+| Request count, identical retry bytes, stream field, nonempty tools and provider-specific control fields | HTTP resend/encoding belongs to Mojentic and is retired. R1 captures complete model/control debug fields; `cli::gateway_requests`, `cli::benchmark_continuity` and `cli::recovery_prerequisites` retain exact complete messages, descriptors and controls. R7 retains tool result wiring. |
+| Exactly one trace; recovery flags/attempt count; logical IDs stable and attempt IDs distinct; wire-attempt ledger | R2/R12 compare complete ordered lifecycle payloads with literal full UUIDs and wire-attempt numbers, exact capture paths/bytes and accounting. R9 checks actual configured attempt limit in run.started; R10 rejects settings before traces. |
+| Admission input has exactly failure and digest; prior identity, digest and zero observed progress; reject bare allow, wrong digest, pending and contaminated identifying metadata | R9 checks the complete independently specified input and actual callback decisions; R17 controls its pending deadline. Mojentic's decision to request admission is retired. |
+| Exact final failure, permanent HTTP statuses/classification, meaningful observed partial progress | R6 compares full typed errors and trace payloads for all ten outcomes and both providers. R15 retains exact 400/401/403, observed/delivered bytes and tool progress; R14 retains absent identity/status/phase/metrics and history fallback. Provider classification is an input, not a verified result. |
+| One attempt-failed before cancelled, no success for dropped attempt; terminal raw byte count, no partial/contaminated tool dispatch | R4 compares the entire lifecycle sequence, full progress and both distinct request identities. R18 covers cancellation after provider success before queued terminal tools are consumed. R1/R3/R7/R8/R16 check real marker-file effects and inert fragments. Executable signal/process-group tests remain. |
+| DONE, one or two successful completions, request depths 0/1, native reasoning, provider metrics eval 7/prompt 11/TPS 7.0 | R2/R4/R7/R12 assert actual final summaries; R12 checks final metrics once with exact duration/counts and no duplicate raw metrics. Existing CLI request/prerequisite tests retain ordered progress, native history and depths. |
+| Renderer succeeds, Request recovery cards, partial content/reasoning, no reconstructed secret across text/tool fields, safe prefix mismatch | R8 renders actual caller traces and reconstructs complete semantic text; R15 checks exact rendered partial text. R13 checks exact safe visible text; existing ordinary-noop/UTF-8 filter tests remain supplemental. |
+| Credential-free stdout/stderr/artifacts, no replay/admission after contamination, meaningful progress for contaminated fields | Public errors, actual trace/renderer text, inert tool effects and one incoming completion are checked in R1/R8/R11. R9 blocks admission on contaminated headers. R4/R15 retain observed progress. Raw provider observation construction is retired; `cli::recovery_prerequisites` retains captured CLI output privacy. |
+| Completed captures count, exact/redacted flags, original request SHA, exact request/response bytes, cancellation prefix length, no pending files | R2/R12 assert complete literal capture identities, request/response bytes and exact metadata. R11 asserts exact withheld bytes, hash and redacted/nonexact metadata. R4 asserts exact partial capture bytes matching terminal progress. R3 tests actual persistence failure. |
+
+No cross-repository boundary changed. The consumer fixtures are not a
+provider-verified Mojentic contract set. Mojentic provider verification is
+outside this repository and is not claimed. Retained executable contracts are
+`microgentic_benchmark_continuity.v1`, SHA-256
+`510915b0d21f86f7263ff5c29399f6a0fd358fb00ac72af2ce5771df96eb31af`,
+and `microgentic_terminal_outcome_contract.v1`, SHA-256
+`6c8afe8fe658944da93d4b8f582d74e20a16d8ef59b1dfa3f128592df1183f37`.
+The first runs in the Rust gate; the second is verified by its Rust producer
+and Python consumer tests in this same repository. Both sides are tested on the
+same working revision, based on delivered trunk
+`19d98ce2789f6918947868e8587a3614e35d83f9`; Foundry owns committing the changes.
+These unchanged local contracts do not verify the Mojentic dependency.
+
+The hardest acceptance probe disables only WorkerGateway's content credential
+filter, observes a completed shell tool write its marker (rejection), then
+restores the filter and observes the same public run reject before execution.
+The five-second evidence drain and operator wait use a task-local manual clock;
+production keeps its existing Tokio timeout and durations.
+
+## Remaining timing and I/O audit
+
+No suite here is designated integration or end-to-end. Cargo's `tests/` layout
+is not permission to use real network infrastructure. The required Rust and
+benchmark Python test sources were searched for sockets/servers, real sleeps
+and elapsed-time assertions. Registered experiment fixtures are preserved and
+excluded from repository test invocation.
+
+| Existing test | Retained deterministic evidence |
+| --- | --- |
+| `tests/microgentic_cli.rs` nonterminal launch | Actual executable completes with status 1, empty stdout and run diagnostic; no host-speed threshold. |
+| `tools::tests::timed_out_{declared_probe,shell_command}_kills_descendant_process_group` | Descendant FIFO readiness precedes manual 999 ms + 1 ms advancement. Exact one-second diagnostic, released-survivor marker absence and writer EOF prove group cleanup; no sleep. |
+| `tui::input::tests::an_empty_pipe_is_idle_until_the_timeout` | Injected monotonic instants and poll gateway require 30 ms, then 18 ms after interruption; real empty pipe remains idle under a zero-duration readiness check. |
+| `trace::tests::runs_at_the_same_instant_get_distinct_files_in_order` | Fixed timestamp, twelve unique files and exact creation/name order; no throughput threshold. |
+| Executable signal, TUI and FIFO support | Real signal/group delivery, descriptor readiness, FIFO gates and terminal restoration retained. `tokio::net::unix::pipe` in the two test providers is Tokio's FIFO API, not a socket; explicit FifoReceiver/FifoSender aliases identify it. Existing condition-variable deadlines are missing-event watchdogs, not behavioral elapsed-time criteria. |
+
+The TUI evidence inventory's shell example now names
+`read -r release < tool-control`, matching the actual synchronized journey.
+Production monotonic clocks, signal grace periods and observational command
+strings are not test sleeps. Disabling only the process-group kill makes both
+descendant timeout tests reject the surviving process marker; restoring SIGKILL
+retains the same checks. No new dependency or Tokio feature is needed.
+
 ## Recovery prerequisite characterization
 
 This inventory was made before replacing `tests/recovery_prerequisites.rs`.
@@ -9,7 +178,7 @@ The replacement lives in `src/cli/recovery_prerequisites.rs` under `cfg(test)`.
 | --- | --- |
 | `reviewed_recovery_stream_preserves_worker_frame_progress`: clean child environment; HTTP POST route, body length and framing; three identical encoded requests | Retire provider-owned transport diagnostics under Stacey's 2026-10-18 removal of real-connection tests. |
 | Legacy stream: four progress frames, initial zero content/thinking/tools and not done; one metrics frame with eval count 7 and 7 tokens/s | Preserve Microgentic's consumption of independently specified progress and metrics through the CLI gateway replacement. |
-| Raw recovery: stable identity and wire attempt 1 on progress/metrics/completion; exact reasoning and DONE; no tools or failure; raw byte count; terminal usage 7/11 and eval duration 1,000,000,000 ns; ordered progress/progress/reasoning/progress/content/progress/metrics/completed | Identity, raw byte accounting, terminal evidence and recovery event translation belong to Mojentic and are retired here. Preserve native reasoning, DONE and ordered Microgentic telemetry at the normalized gateway boundary. |
+| Raw recovery: stable identity and wire attempt 1 on progress/metrics/completion; exact reasoning and DONE; no tools or failure; raw byte count; terminal usage 7/11 and eval duration 1,000,000,000 ns; ordered progress/progress/reasoning/progress/content/progress/metrics/completed | Provider parsing belongs to Mojentic. Microgentic identity, byte accounting, terminal evidence and recovery event consumption are retained by the recovery caller tests above; normalized telemetry remains in this prerequisite suite. |
 | Raw and convenience progress/metrics equal legacy after discarding client timing; persisted response/request bodies and assertions identifying reviewed revision | Retire cross-adapter comparisons and diagnostic artifacts. A scripted gateway does not verify Mojentic, recovery conformance, HTTP encoding or stream decoding. |
 | `actual_worker_provider_paths_preserve_progress_prerequisites`: Python subprocess succeeds; both provider cases complete | Replace with separate Ollama and oMLX cases through the production CLI parser/dispatcher and public agent API. |
 | Python handler: expected route, oMLX Bearer credential, no handler failures; subprocess exit 0; exactly one request; DONE summary; exactly one trace | Preserve dispatcher success, complete single gateway request, DONE and single trace. Route/authentication and process/environment plumbing are provider/OS diagnostics, retired. |
@@ -18,9 +187,9 @@ The replacement lives in `src/cli/recovery_prerequisites.rs` under `cfg(test)`.
 | Python Ollama telemetry: four progress payloads, first content/thinking/tools all zero; one metrics payload, eval 7, prompt 11, throughput 7.0 | Preserve full ordered progress payloads and provider metrics with independent literal expectations, including durations and optional fields. |
 | Python response/request/stdout/stderr/assertion files and worker executable SHA-256 | Use temporary CLI artifacts and Rust assertions; no frozen binary provenance claim. Registered Python harness and its inputs remain unchanged. |
 
-The separate `tests/recovery_worker.rs` invocation of `worker_conformance.py`
-remains outside this migration. No application/repository boundary changes;
-provider verification is not supplied by these consumer-side tests.
+The worker matrix is replaced by the recovery caller tests above. No
+application/repository boundary changes or Mojentic provider verification are
+claimed by these consumer tests.
 
 Replacement evidence (`cargo test --locked --lib cli::recovery_prerequisites`):
 
@@ -38,9 +207,10 @@ The complete messages and descriptors reuse the existing versioned
 expectations. Provider-control trace version is `provider_request.v1`.
 The gateway replies are consumer inputs, not provider-verified contracts.
 There is no changed external boundary and no new paired contract verification
-claim. In particular, raw/convenience recovery identity, byte accounting,
-terminal evidence, wire optional fields and legacy equivalence remain unverified
-by this suite. The registered conformance matrix is unchanged.
+claim. The recovery caller tests above retain Microgentic identity, byte
+accounting, terminal evidence and optional fields. Provider decoding and
+raw/convenience/legacy equivalence remain outside this suite. The registered
+conformance harness files are unchanged.
 
 ## Gateway request migration
 
@@ -128,9 +298,8 @@ Run `cargo test --locked --lib cli::capped_reasoning`; the required all-targets
 test gate includes it. The acceptance probe rejected the same stream with a cap
 of 8192 because completed reasoning entered the second request, then passed with
 cap 1. This characterizes runtime interruption and history retention, without
-claiming to verify Mojentic's HTTP transport. The remaining `omlx_gateway`
-integration cases still need `mock_server` and `run_cli_options`; both helpers
-remain. No external application contract changed.
+claiming to verify Mojentic's HTTP transport. The remaining `omlx_gateway` case tests serialization without connections;
+the obsolete server helpers are gone. No external application contract changed.
 
 `src/cli/run_outcomes.rs` replaces the former `tests/run_outcomes.rs` integration
 suite. All 13 test names are retained under `cli::run_outcomes`. They parse real
@@ -428,7 +597,7 @@ two retained provider cases; both executable names means all four retained
 | `tui_chats_naturally_and_can_perform_work_when_requested_{omlx,ollama}` | Idle startup makes no conversation call. Greetings have no assumed engineering task or evidence footer. An empty reply continues; discussing a quoted command executes nothing. Explicit work writes the exact Rust source, real offline `cargo check` succeeds, its trace records the write/check, project work has an evidence footer, later thanks has none. Native prompts and conversational system policy remain asserted. |
 | Both executable names: streamed native history | A long untruncated live reply is visible while a stream gate is closed. Real `read_file` output and Unicode survive into the complete next request. Read-only project work retains its evidence footer. Ctrl-C leaves an error in native state, excludes partial content, and the next request retains the codename and stopped-request notice. Wrong model/project state is rejected by the actual worker before gateway invocation. An ordinary `run` starts with fresh history and identical completion controls; compatibility `run` retains its historical descriptor set. A second TUI starts a separate conversation. |
 | `tui_slash_commands_stay_local_{omlx,ollama}` | Actual `/help`, `/guidance`, invalid command/effort, model and effort pickers, keyboard selection/cancel, unchanged-settings notices, clear, default effort, `//` escaping and commands during a held reply retain their rendered assertions. Requests prove model/effort changes, history reset/retention, preserved saved config and retained session files. Full listing operation is recorded; picker asserts both actual model names. Native completion config replaces HTTP-specific effort fields. |
-| `tui_shows_each_tool_call_as_one_live_line_{omlx,ollama}` | A real shell waits on a FIFO until both batch tool lines are rendered running; a manually advanced spinner tick produces a different glyph before release. Success, missing-file failure, arithmetic result, green/red cells, one line per call, no residual spinner/Using/finished lines and the evidence footer remain asserted. `sleep 1` becomes `read -r release < tool-control`; the command label changes accordingly. |
+| `tui_shows_each_tool_call_as_one_live_line_{omlx,ollama}` | A real shell waits on a FIFO until both batch tool lines are rendered running; a manually advanced spinner tick produces a different glyph before release. Success, missing-file failure, arithmetic result, green/red cells, one line per call, no residual spinner/Using/finished lines and the evidence footer remain asserted. The command label is `read -r release < tool-control`, matching the FIFO gate. |
 | `tui_status_bar_shows_git_state_and_a_known_context_window` | Complete identity/branch/modified/untracked/empty-gauge row and its semantic colours remain exact. Actual ledger token usage determines the displayed percentage, and new untracked work appears after the next exchange. Real Git operations remain. |
 | `tui_status_bar_shows_only_what_it_knows_outside_git` | Complete identity-only initial row, colours and unknown-window compact token count remain asserted against the actual trace ledger; no invented branch or capacity. |
 | `tui_launch_animation_settles_on_the_resting_screen` | Manual time advances through seed, burst/assembled letters and final welcome. At least six painted frames, seed/wordmark, final resting frame, current resting screen and no provider operations remain asserted. The wall-clock `<2.4s` threshold and 300 ms quiet period are deleted: the injected timeline reaches the final screen at 2000 ms without measuring host performance. |

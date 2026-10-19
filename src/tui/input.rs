@@ -35,31 +35,45 @@ pub(super) fn wait(timeout: Duration) -> io::Result<Wait> {
 /// Wait up to `timeout` for input on `fd`.
 #[cfg(unix)]
 fn wait_on(fd: std::os::fd::RawFd, timeout: Duration) -> io::Result<Wait> {
-    let deadline = std::time::Instant::now() + timeout;
+    wait_on_with(
+        fd,
+        timeout,
+        std::time::Instant::now,
+        |descriptor, millis| {
+            // SAFETY: descriptor points to one initialized pollfd that stays valid
+            // throughout poll; the count describes exactly that one descriptor.
+            let ready = unsafe { libc::poll(descriptor, 1, millis) };
+            if ready >= 0 {
+                Ok(())
+            } else {
+                Err(io::Error::last_os_error())
+            }
+        },
+    )
+}
+
+#[cfg(unix)]
+fn wait_on_with(
+    fd: std::os::fd::RawFd,
+    timeout: Duration,
+    mut now: impl FnMut() -> std::time::Instant,
+    mut poll: impl FnMut(&mut libc::pollfd, libc::c_int) -> io::Result<()>,
+) -> io::Result<Wait> {
+    let deadline = now() + timeout;
     loop {
-        let mut fds = [libc::pollfd {
+        let mut descriptor = libc::pollfd {
             fd,
             events: libc::POLLIN,
             revents: 0,
-        }];
-        let left = deadline.saturating_duration_since(std::time::Instant::now());
-        // Rounded up, so the wait never ends before the deadline.
+        };
+        let left = deadline.saturating_duration_since(now());
         let millis =
             libc::c_int::try_from(left.as_micros().div_ceil(1_000)).unwrap_or(libc::c_int::MAX);
-        // SAFETY: `fds` is one initialised `pollfd`, and the pointer and
-        // count describe exactly that array for the duration of the call.
-        let ready = unsafe { libc::poll(fds.as_mut_ptr(), 1, millis) };
-        if ready >= 0 {
-            return Ok(classify(fds[0].revents));
+        match poll(&mut descriptor, millis) {
+            Ok(()) => return Ok(classify(descriptor.revents)),
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            Err(error) => return Err(error),
         }
-        let error = io::Error::last_os_error();
-        if error.kind() != io::ErrorKind::Interrupted {
-            return Err(error);
-        }
-        // A signal ended the wait early. The hang-up that closes a
-        // controlling terminal arrives as SIGHUP in this very way, so the
-        // wait resumes and reports what the descriptor now says rather
-        // than letting crossterm read it.
     }
 }
 
@@ -118,13 +132,30 @@ mod tests {
     #[test]
     fn an_empty_pipe_is_idle_until_the_timeout() {
         let (reader, _writer) = io::pipe().expect("a pipe");
-        let started = std::time::Instant::now();
-        let state = wait_on(reader.as_raw_fd(), Duration::from_millis(30)).expect("polling");
+        let epoch = std::time::Instant::now();
+        let mut times = [epoch, epoch, epoch + Duration::from_millis(12)].into_iter();
+        let mut waits = Vec::new();
+        let state = wait_on_with(
+            reader.as_raw_fd(),
+            Duration::from_millis(30),
+            || times.next().expect("unexpected clock read"),
+            |descriptor, millis| {
+                assert_eq!(descriptor.fd, reader.as_raw_fd());
+                assert_eq!(descriptor.events, libc::POLLIN);
+                waits.push(millis);
+                if waits.len() == 1 {
+                    Err(io::Error::from(io::ErrorKind::Interrupted))
+                } else {
+                    Ok(())
+                }
+            },
+        )
+        .unwrap();
         assert_eq!(state, Wait::Idle);
-        // The kernel's timer granularity is the only slack allowed.
-        assert!(
-            started.elapsed() >= Duration::from_millis(25),
-            "the wait returned early"
+        assert_eq!(waits, [30, 18], "a signal must not restart the timeout");
+        assert_eq!(
+            wait_on(reader.as_raw_fd(), Duration::ZERO).unwrap(),
+            Wait::Idle
         );
     }
 

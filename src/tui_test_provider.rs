@@ -8,7 +8,8 @@ use serde_json::{Value, json};
 use std::io::Write;
 use std::path::PathBuf;
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::net::unix::pipe::Receiver;
+// This Tokio `net` API wraps the existing FIFO descriptor, not a socket.
+use tokio::net::unix::pipe::Receiver as FifoReceiver;
 
 pub(crate) fn gateway(
     cancellation: tokio_util::sync::CancellationToken,
@@ -117,7 +118,7 @@ impl LlmGateway for Gateway {
             .await
             .map_err(error)??;
             Ok::<_, mojentic::error::MojenticError>(BufReader::new(
-                Receiver::from_owned_fd(reader.into()).map_err(error)?,
+                FifoReceiver::from_owned_fd(reader.into()).map_err(error)?,
             ))
         })
         .flat_map(move |reader| {

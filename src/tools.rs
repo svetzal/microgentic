@@ -9,6 +9,8 @@ use crate::runtime::{
     SuccessfulValidation, ValidationRepair,
 };
 use crate::sha256::sha256_hex;
+#[cfg(test)]
+use crate::test_clock::timeout;
 use crate::trace::TraceRecorder;
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
@@ -25,7 +27,9 @@ use std::sync::{Arc, Mutex};
 use std::time::UNIX_EPOCH;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
-use tokio::time::{Duration, timeout};
+use tokio::time::Duration;
+#[cfg(not(test))]
+use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 
 const MAX_CAPTURED_OUTPUT_BYTES: usize = 20_000;
@@ -6767,24 +6771,77 @@ bytes[0..5] \"cafe\\n\""
     #[cfg(unix)]
     #[tokio::test]
     async fn timed_out_declared_probe_kills_descendant_process_group() {
+        assert_timeout_kills_descendants(Some("timeout-probe")).await;
+    }
+
+    #[cfg(unix)]
+    async fn assert_timeout_kills_descendants(declared: Option<&str>) {
+        use std::io::{BufRead, Read};
         let temp = tempfile::tempdir().unwrap();
-        let scope = scope(&temp);
-        let tool = ShellCommandTool { scope };
-        let command = "(sleep 2; printf 'late\\n' > late-probe.txt) & wait";
+        for name in ["events", "control"] {
+            assert!(
+                std::process::Command::new("mkfifo")
+                    .arg(temp.path().join(name))
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+        }
+        let mut control_pipe = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(temp.path().join("control"))
+            .unwrap();
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+        let (closed_tx, closed_rx) = tokio::sync::oneshot::channel();
+        let events = temp.path().join("events");
+        let reader = std::thread::spawn(move || {
+            let mut input = std::io::BufReader::new(std::fs::File::open(events).unwrap());
+            let mut ready = String::new();
+            input.read_line(&mut ready).unwrap();
+            ready_tx.send(ready).unwrap();
+            let mut tail = String::new();
+            input.read_to_string(&mut tail).unwrap();
+            closed_tx.send(tail).unwrap();
+        });
+        let tool = ShellCommandTool {
+            scope: scope(&temp),
+        };
         let args = HashMap::from([
-            ("command".to_string(), json!(command)),
+            (
+                "command".to_string(),
+                json!(
+                    "(exec 3>events; printf 'descendant-ready\n' >&3; read -r release < control; printf late > late.txt) & wait"
+                ),
+            ),
             ("timeout_secs".to_string(), json!(1)),
         ]);
-
-        let error = tool
-            .shell_effect(&args, Some("timeout-probe"))
-            .await
-            .unwrap_err()
-            .to_string();
-        assert!(error.contains("timed out after 1s"));
-
-        tokio::time::sleep(Duration::from_secs(2)).await;
-        assert!(!temp.path().join("late-probe.txt").exists());
+        let clock = Arc::new(crate::test_clock::Clock::default());
+        crate::test_clock::ACTIVE
+            .scope(clock.clone(), async {
+                let control = async {
+                    assert_eq!(ready_rx.await.unwrap(), "descendant-ready\n");
+                    assert_eq!(clock.requested(), [Duration::from_secs(1)]);
+                    clock.advance(Duration::from_millis(999));
+                    tokio::task::yield_now().await;
+                    assert!(!temp.path().join("late.txt").exists());
+                    clock.advance(Duration::from_millis(1));
+                };
+                let (result, ()) = tokio::join!(tool.shell_effect(&args, declared), control);
+                assert!(
+                    result
+                        .unwrap_err()
+                        .to_string()
+                        .contains("timed out after 1s")
+                );
+            })
+            .await;
+        // Release any survivor so a broken group kill fails on its marker
+        // instead of leaving a test blocked on EOF.
+        std::io::Write::write_all(&mut control_pipe, b"release\n").unwrap();
+        assert_eq!(closed_rx.await.unwrap(), "");
+        reader.join().unwrap();
+        assert!(!temp.path().join("late.txt").exists());
     }
 
     #[tokio::test]
@@ -7030,23 +7087,7 @@ bytes[0..5] \"cafe\\n\""
     #[cfg(unix)]
     #[tokio::test]
     async fn timed_out_shell_command_kills_descendant_process_group() {
-        let temp = tempfile::tempdir().unwrap();
-        let tool = ShellCommandTool {
-            scope: scope(&temp),
-        };
-        let args = HashMap::from([
-            (
-                "command".to_string(),
-                json!("(sleep 2; printf 'late\n' > late.txt) & wait"),
-            ),
-            ("timeout_secs".to_string(), json!(1)),
-        ]);
-
-        let error = tool.shell(&args).await.unwrap_err().to_string();
-        assert!(error.contains("timed out after 1s"));
-
-        tokio::time::sleep(Duration::from_secs(2)).await;
-        assert!(!temp.path().join("late.txt").exists());
+        assert_timeout_kills_descendants(None).await;
     }
 
     #[tokio::test]

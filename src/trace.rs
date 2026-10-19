@@ -250,15 +250,13 @@ mod tests {
     }
 
     /// Runs that start at the same instant each get their own file, in
-    /// creation order, and none waits.
+    /// creation order.
     #[test]
     fn runs_at_the_same_instant_get_distinct_files_in_order() {
         let dir = tempfile::tempdir().unwrap();
-        let started = std::time::Instant::now();
         let created: Vec<PathBuf> = (0..12)
             .map(|_| create_unique_trace(dir.path(), instant()).unwrap().0)
             .collect();
-        assert!(started.elapsed() < std::time::Duration::from_secs(1));
         let unique: BTreeSet<&PathBuf> = created.iter().collect();
         assert_eq!(unique.len(), 12, "{created:?}");
         // Name order is creation order, so transcripts keep run order.

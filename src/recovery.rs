@@ -1,5 +1,7 @@
 //! Worker request recovery, operator admission, and credential-safe persistence.
 //! The Mojentic engine owns retries; this module never replays an agent or a tool.
+#[cfg(test)]
+use crate::test_clock::timeout as recovery_timeout;
 use crate::{sha256::sha256_hex, trace::TraceRecorder};
 use anyhow::{Result, bail};
 use async_trait::async_trait;
@@ -20,6 +22,8 @@ use std::{
     sync::{Arc, Mutex},
     time::Duration,
 };
+#[cfg(not(test))]
+use tokio::time::timeout as recovery_timeout;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     process::Command,
@@ -600,7 +604,7 @@ impl Evidence {
                 notified.await;
             }
         };
-        if tokio::time::timeout(Duration::from_secs(5), drain)
+        if recovery_timeout(Duration::from_secs(5), drain)
             .await
             .is_err()
         {
@@ -817,7 +821,7 @@ impl Admission for OperatorAdmission {
             serde_json::from_slice::<Value>(&bytes).ok()
         };
         // Dropping either timeout or Mojentic's cancellable admission future kills our child.
-        let Ok(Some(mut proof)) = tokio::time::timeout(Duration::from_secs(5), proof).await else {
+        let Ok(Some(mut proof)) = recovery_timeout(Duration::from_secs(5), proof).await else {
             return AdmissionDecision::Reject;
         };
         if redact_value(&mut proof, &self.evidence.secrets) {
@@ -841,38 +845,109 @@ impl Admission for OperatorAdmission {
     }
 }
 
+pub(crate) fn worker_policy(
+    settings: &RecoverySettings,
+    evidence: Arc<Evidence>,
+) -> Result<RecoveryPolicy> {
+    let mut policy = RecoveryPolicy {
+        max_attempts: NonZeroU32::new(settings.recovery_max_attempts)
+            .ok_or_else(|| anyhow::anyhow!("invalid attempt limit"))?,
+        base_delay: Duration::from_millis(settings.recovery_base_delay_ms),
+        delay_ceiling: Duration::from_millis(settings.recovery_delay_ceiling_ms),
+        budget: settings.recovery_budget_ms.map(Duration::from_millis),
+        observer: Some(evidence.clone()),
+        wire_observer: Some(evidence.clone()),
+        ..Default::default()
+    };
+    if !settings.recovery_retryable_status.is_empty() {
+        policy.retryable_statuses = settings.recovery_retryable_status.iter().copied().collect();
+    }
+    if let Some(command) = &settings.recovery_admission_command {
+        policy.admission = Some(Arc::new(OperatorAdmission {
+            command: command.canonicalize()?,
+            evidence: evidence.clone(),
+        }));
+    }
+    Ok(policy)
+}
+
+// Microgentic consumes lifecycle-bearing completions, not provider transports.
+// The production adapter delegates unchanged to Mojentic; caller tests supply
+// an in-process gateway implementing this same completion boundary.
+#[async_trait]
+pub(crate) trait RecoveryCompletion: LlmGateway {
+    async fn complete_with_recovery(
+        &self,
+        model: &str,
+        messages: &[LlmMessage],
+        tools: Option<&[Box<dyn LlmTool>]>,
+        config: &CompletionConfig,
+        call: &RecoveryCall,
+    ) -> std::result::Result<Recovered<LlmGatewayResponse>, RecoveryError>;
+    async fn complete_json_with_recovery(
+        &self,
+        model: &str,
+        messages: &[LlmMessage],
+        schema: Value,
+        config: &CompletionConfig,
+        call: &RecoveryCall,
+    ) -> std::result::Result<Recovered<LlmGatewayResponse<Value>>, RecoveryError>;
+    fn complete_stream_with_recovery<'a>(
+        &'a self,
+        model: &'a str,
+        messages: &'a [LlmMessage],
+        tools: Option<&'a [Box<dyn LlmTool>]>,
+        config: &'a CompletionConfig,
+        call: &'a RecoveryCall,
+    ) -> Pin<Box<dyn Stream<Item = RecoveryStreamEvent> + Send + 'a>>;
+}
+#[async_trait]
+impl<G: RecoveryProvider> RecoveryCompletion for RecoveryGateway<G> {
+    async fn complete_with_recovery(
+        &self,
+        model: &str,
+        messages: &[LlmMessage],
+        tools: Option<&[Box<dyn LlmTool>]>,
+        config: &CompletionConfig,
+        call: &RecoveryCall,
+    ) -> std::result::Result<Recovered<LlmGatewayResponse>, RecoveryError> {
+        RecoveryGateway::complete_with_recovery(self, model, messages, tools, config, call).await
+    }
+    async fn complete_json_with_recovery(
+        &self,
+        model: &str,
+        messages: &[LlmMessage],
+        schema: Value,
+        config: &CompletionConfig,
+        call: &RecoveryCall,
+    ) -> std::result::Result<Recovered<LlmGatewayResponse<Value>>, RecoveryError> {
+        RecoveryGateway::complete_json_with_recovery(self, model, messages, schema, config, call)
+            .await
+    }
+    fn complete_stream_with_recovery<'a>(
+        &'a self,
+        model: &'a str,
+        messages: &'a [LlmMessage],
+        tools: Option<&'a [Box<dyn LlmTool>]>,
+        config: &'a CompletionConfig,
+        call: &'a RecoveryCall,
+    ) -> Pin<Box<dyn Stream<Item = RecoveryStreamEvent> + Send + 'a>> {
+        RecoveryGateway::complete_stream_with_recovery(self, model, messages, tools, config, call)
+    }
+}
 pub(crate) struct WorkerGateway<G> {
-    inner: RecoveryGateway<G>,
+    inner: G,
     evidence: Arc<Evidence>,
     call: RecoveryCall,
 }
-impl<G: RecoveryProvider> WorkerGateway<G> {
+impl<G: RecoveryProvider> WorkerGateway<RecoveryGateway<G>> {
     pub(crate) fn new(
         inner: G,
         settings: &RecoverySettings,
         call: RecoveryCall,
         evidence: Arc<Evidence>,
     ) -> Result<Self> {
-        let mut policy = RecoveryPolicy {
-            max_attempts: NonZeroU32::new(settings.recovery_max_attempts)
-                .ok_or_else(|| anyhow::anyhow!("invalid attempt limit"))?,
-            base_delay: Duration::from_millis(settings.recovery_base_delay_ms),
-            delay_ceiling: Duration::from_millis(settings.recovery_delay_ceiling_ms),
-            budget: settings.recovery_budget_ms.map(Duration::from_millis),
-            observer: Some(evidence.clone()),
-            wire_observer: Some(evidence.clone()),
-            ..Default::default()
-        };
-        if !settings.recovery_retryable_status.is_empty() {
-            policy.retryable_statuses =
-                settings.recovery_retryable_status.iter().copied().collect();
-        }
-        if let Some(command) = &settings.recovery_admission_command {
-            policy.admission = Some(Arc::new(OperatorAdmission {
-                command: command.canonicalize()?,
-                evidence: evidence.clone(),
-            }));
-        }
+        let policy = worker_policy(settings, evidence.clone())?;
         Ok(Self {
             inner: RecoveryGateway::new(inner, policy)?,
             evidence,
@@ -880,7 +955,16 @@ impl<G: RecoveryProvider> WorkerGateway<G> {
         })
     }
 }
-impl<G: RecoveryProvider> WorkerGateway<G> {
+impl<G: RecoveryCompletion> WorkerGateway<G> {
+    #[cfg(test)]
+    pub(crate) fn scripted(inner: G, evidence: Arc<Evidence>, call: RecoveryCall) -> Self {
+        Self {
+            inner,
+            evidence,
+            call,
+        }
+    }
+
     fn finish_completion<T: serde::Serialize>(
         &self,
         result: std::result::Result<Recovered<LlmGatewayResponse<T>>, RecoveryError>,
@@ -998,7 +1082,7 @@ impl SemanticFilter {
     }
 }
 #[async_trait]
-impl<G: RecoveryProvider> LlmGateway for WorkerGateway<G> {
+impl<G: RecoveryCompletion> LlmGateway for WorkerGateway<G> {
     async fn complete(
         &self,
         model: &str,
