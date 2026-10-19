@@ -47,21 +47,30 @@ cargo build --locked --release --bins
 mdbook build book
 ```
 
-End-to-end tests are Rust integration tests. Build new ones on `tests/support/`:
-a pseudo-terminal driver with a rendered screen, one mock server for oMLX and
-Ollama, and workspace fixtures. Do not add Python test scripts under `tests/`.
+No suite in this repository is designated integration or end-to-end. The
+`tests/` Cargo layout is not an exception to the test I/O rules: tests must make
+no real network connections, open no sockets or servers, and use in-process
+gateway/transport doubles at application I/O boundaries. Drive the public run
+API or actual CLI dispatcher, preserving validation, evidence and settlement.
+Use injected clocks for deadline and elapsed-time behavior; never use real
+sleeps or wall-clock thresholds as behavioral evidence. Preserve executable
+signal/process-group checks and FIFO/readiness handshakes without settling delays.
+Use Rust tests and the existing `tests/support/` workspace fixtures; do not add
+Python scripts under `tests/`.
+
 Benchmark continuity runs in-process with
 `cargo test --locked --lib cli::benchmark_continuity`. Fixed gateway request,
-packet and ledger expectations replace the retired socket-based old-binary
-comparison; see `tests/README.md` for its coverage and limits.
-The recovery tests call the Python harness in `fixtures/recovery/` and
-`fixtures/progress/`. Stacey decided on 2026-10-15 that this harness stays in
-Python, because registered experiments run it and hash-register it. Do not port
-it unless she revisits that decision.
+packet and ledger expectations retain their existing versioned specification;
+see `tests/README.md` for its coverage and limits. Registered experiment harnesses
+in `fixtures/recovery/` and `fixtures/progress/` stay unchanged in Python and are
+not invoked by repository tests. Stacey decided on 2026-10-15 that registered
+experiments retain and hash-register those files. Do not port them unless she
+revisits that decision.
 
-Provider fixtures use mock HTTP servers. Do not start local models for routine
-checks. Preserve model patience and let the runtime own stop policy during live
-runs. Local-model comparisons stay within Qwen unless the user requests otherwise.
+Provider fixtures use in-process gateway/transport doubles. Do not start local
+models for routine checks. Preserve model patience and let the runtime own stop
+policy during live runs. Local-model comparisons stay within Qwen unless the
+user requests otherwise.
 
 ## Local install and CI
 

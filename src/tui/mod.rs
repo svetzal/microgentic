@@ -1049,7 +1049,7 @@ mod tests {
             ConversationEvent::ToolStarted {
                 call_id: "b".into(),
                 name: "shell_command".into(),
-                arguments: serde_json::json!({"command": "sleep 1"}),
+                arguments: serde_json::json!({"command": "read -r release < tool-control"}),
             },
         ];
         for event in events {
@@ -1093,7 +1093,7 @@ mod tests {
         let text = history_text(&view);
         assert!(
             text.ends_with(
-                "Microgentic: Checking.\n  ✓ read_file notes.txt:1-2\n  ✗ shell_command sleep 1\n\nDone.\nEvidence: t.jsonl\n"
+                "Microgentic: Checking.\n  ✓ read_file notes.txt:1-2\n  ✗ shell_command read -r release < tool-control\n\nDone.\nEvidence: t.jsonl\n"
             ),
             "{text}"
         );

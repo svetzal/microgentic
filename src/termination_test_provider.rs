@@ -7,7 +7,9 @@ use mojentic::llm::models::{LlmGatewayResponse, LlmToolCall};
 use mojentic::llm::{CompletionConfig, LlmGateway, LlmMessage, LlmTool};
 use serde_json::Value;
 use std::fs::OpenOptions;
-use tokio::net::unix::pipe::{Receiver, Sender};
+// Tokio locates FIFO readiness under `net`; these descriptors are named pipes,
+// never sockets. Keep their purpose visible in the type names and audit.
+use tokio::net::unix::pipe::{Receiver as FifoReceiver, Sender as FifoSender};
 
 pub(crate) async fn override_gateway(
     original: Box<dyn LlmGateway>,
@@ -31,8 +33,8 @@ pub(crate) async fn override_gateway(
         command,
         cancellation,
         io: PipeIo {
-            control: Receiver::from_owned_fd(control.into())?,
-            events: Sender::from_owned_fd(events.into())?,
+            control: FifoReceiver::from_owned_fd(control.into())?,
+            events: FifoSender::from_owned_fd(events.into())?,
         },
     }))
 }
@@ -74,8 +76,8 @@ trait ScriptIo: Send + Sync {
 }
 
 struct PipeIo {
-    control: Receiver,
-    events: Sender,
+    control: FifoReceiver,
+    events: FifoSender,
 }
 
 #[async_trait]

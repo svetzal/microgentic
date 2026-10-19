@@ -360,10 +360,26 @@ async fn run_agent_entry(
     let tool_root = PathBuf::from(".")
         .canonicalize()
         .context("canonicalizing harness cwd")?;
+    #[cfg(test)]
+    let tool_root = crate::recovery_test_io::ACTIVE
+        .try_with(|io| io.tool_root.clone())
+        .unwrap_or(tool_root);
     config.recovery.validate(&tool_root)?;
     let evidence = crate::recovery::evidence(&config.recovery);
     let call = mojentic::llm::recovery::RecoveryCall::default();
     let cancellation = call.cancellation.clone();
+    #[cfg(test)]
+    let gateway: Option<Box<dyn LlmGateway>> =
+        match crate::recovery_test_io::ACTIVE.try_with(Arc::clone) {
+            Ok(io) => Some(Box::new(crate::recovery::WorkerGateway::scripted(
+                io.gateway(evidence.clone(), &config.recovery)?,
+                evidence.clone(),
+                call.clone(),
+            ))),
+            Err(_) => None,
+        };
+    #[cfg(not(test))]
+    let gateway: Option<Box<dyn LlmGateway>> = None;
     // A termination signal cancels the model request and any project command
     // through this one token. Work that does not notice within the grace
     // period is ended anyway, with the signal's conventional status.
@@ -372,36 +388,43 @@ async fn run_agent_entry(
     // none has.
     let termination = Arc::new(AtomicI32::new(0));
     let recorded = termination.clone();
-    let signal = crate::signals::on_termination(
-        crate::signals::GRACE,
-        move |signal| {
-            recorded.store(signal, Ordering::SeqCst);
-            requested.cancel();
+    let signal = if gateway.is_some() {
+        None
+    } else {
+        Some(crate::signals::on_termination(
+            crate::signals::GRACE,
+            move |signal| {
+                recorded.store(signal, Ordering::SeqCst);
+                requested.cancel();
+            },
+            |signal| {
+                // Standard error may be gone with the parent, so a failed write
+                // must not panic this task before the exit below.
+                let _ = writeln!(
+                    std::io::stderr(),
+                    "microgentic: {} ended the run before its work could stop",
+                    crate::signals::name(signal)
+                );
+                std::process::exit(crate::signals::exit_status(signal));
+            },
+        )?)
+    };
+    let gateway: Box<dyn LlmGateway> = match gateway {
+        Some(gateway) => gateway,
+        None => match config.provider {
+            Provider::Omlx => Box::new(crate::recovery::WorkerGateway::new(
+                OmlxGateway::new(),
+                &config.recovery,
+                call,
+                evidence.clone(),
+            )?),
+            Provider::Ollama => Box::new(crate::recovery::WorkerGateway::new(
+                OllamaGateway::new(),
+                &config.recovery,
+                call,
+                evidence.clone(),
+            )?),
         },
-        |signal| {
-            // Standard error may be gone with the parent, so a failed write
-            // must not panic this task before the exit below.
-            let _ = writeln!(
-                std::io::stderr(),
-                "microgentic: {} ended the run before its work could stop",
-                crate::signals::name(signal)
-            );
-            std::process::exit(crate::signals::exit_status(signal));
-        },
-    )?;
-    let gateway: Box<dyn LlmGateway> = match config.provider {
-        Provider::Omlx => Box::new(crate::recovery::WorkerGateway::new(
-            OmlxGateway::new(),
-            &config.recovery,
-            call,
-            evidence.clone(),
-        )?),
-        Provider::Ollama => Box::new(crate::recovery::WorkerGateway::new(
-            OllamaGateway::new(),
-            &config.recovery,
-            call,
-            evidence.clone(),
-        )?),
     };
     #[cfg(all(
         feature = "termination-test-provider",
@@ -426,7 +449,9 @@ async fn run_agent_entry(
     )
     .await;
     let settled = evidence.settle().await;
-    signal.abort();
+    if let Some(signal) = signal {
+        signal.abort();
+    }
     match result {
         Err(error) => match termination.load(Ordering::SeqCst) {
             0 => Err(error),

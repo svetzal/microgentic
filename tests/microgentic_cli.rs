@@ -171,18 +171,24 @@ fn prompt_must_match_an_authoritative_contract_before_a_run_is_created() {
 #[test]
 fn interactive_mode_without_a_terminal_exits_at_once_and_points_at_run() {
     let temp = tempfile::tempdir().unwrap();
-    let started = std::time::Instant::now();
     let output = worker()
         .arg("--config")
         .arg(temp.path().join("config.json"))
         .env("OMLX_HOST", "http://127.0.0.1:1")
         .output()
         .unwrap();
-    assert!(
-        started.elapsed() < std::time::Duration::from_secs(5),
-        "the binary waited on a terminal it does not have"
-    );
-    assert!(!output.status.success());
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("microgentic run"), "{stderr}");
+}
+
+#[test]
+fn recovery_help_explains_wire_attempts_and_examples() {
+    let output = worker().args(["run", "--help"]).output().unwrap();
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    let help = String::from_utf8(output.stdout).unwrap();
+    assert!(help.contains("Wire attempts"));
+    assert!(help.contains("Examples:"));
 }
