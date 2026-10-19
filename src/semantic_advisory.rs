@@ -236,6 +236,7 @@ mod tests {
     struct ProposalGateway {
         proposal: Value,
         complete_json_calls: Mutex<usize>,
+        requests: Mutex<Vec<Value>>,
     }
 
     #[async_trait]
@@ -252,13 +253,14 @@ mod tests {
 
         async fn complete_json(
             &self,
-            _model: &str,
-            _messages: &[LlmMessage],
-            _schema: Value,
+            model: &str,
+            messages: &[LlmMessage],
+            schema: Value,
             config: &CompletionConfig,
         ) -> std::result::Result<Value, MojenticError> {
             assert_eq!(config.max_tool_iterations, 0);
             *self.complete_json_calls.lock().unwrap() += 1;
+            self.requests.lock().unwrap().push(json!({"model": model, "messages": messages, "schema": schema, "completion": format!("{config:?}")}));
             Ok(self.proposal.clone())
         }
 
@@ -292,12 +294,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn structured_advisory_preserves_complete_request_and_response() {
+        let gateway = ProposalGateway {
+            proposal: json!({"accepted": true}),
+            complete_json_calls: Mutex::new(0),
+            requests: Mutex::new(Vec::new()),
+        };
+        let temp = tempfile::tempdir().unwrap();
+        let trace = TraceRecorder::create(temp.path()).unwrap();
+        let messages = [LlmMessage::user("Assess the proposal.")];
+        let schema = json!({"type":"object", "properties":{"accepted":{"type":"boolean"}}, "required":["accepted"], "additionalProperties":false});
+        let response = request_semantic_advisory(
+            &gateway,
+            SemanticAdvisoryRequest {
+                advisory_kind: SemanticAdvisoryKind::AcceptancePlanning,
+                model: "test-qwen",
+                messages: &messages,
+                response_schema: schema.clone(),
+                max_input_chars: 1024,
+                max_output_tokens: 256,
+                temperature: 0.2,
+                capture_reasoning: false,
+            },
+            &trace,
+        )
+        .await
+        .unwrap();
+        assert_eq!(response.raw_proposal, json!({"accepted":true}));
+        assert_eq!(
+            *gateway.requests.lock().unwrap(),
+            [json!({
+                "model":"test-qwen", "messages":[{"role":"user", "content":"Assess the proposal."}],
+                "schema":schema,
+                "completion":"CompletionConfig { temperature: Some(0.2), num_ctx: Some(32768), max_tokens: Some(256), top_p: None, top_k: None, response_format: Some(JsonObject { schema: Some(Object {\"additionalProperties\": Bool(false), \"properties\": Object {\"accepted\": Object {\"type\": String(\"boolean\")}}, \"required\": Array [String(\"accepted\")], \"type\": String(\"object\")}) }), reasoning_effort: None, reasoning_profile: None, preserve_reasoning: false, max_tool_iterations: 0 }"
+            })]
+        );
+    }
+
+    #[tokio::test]
     async fn advisory_is_structured_isolated_and_traceable() {
         let temp = tempfile::tempdir().unwrap();
         let trace = TraceRecorder::create(temp.path()).unwrap();
         let gateway = ProposalGateway {
             proposal: json!({"classification": "relevant"}),
             complete_json_calls: Mutex::new(0),
+            requests: Mutex::new(Vec::new()),
         };
         let messages = vec![LlmMessage::user("Classify the supplied evidence.")];
 
@@ -333,6 +374,7 @@ mod tests {
         let gateway = ProposalGateway {
             proposal: json!({"classification": "relevant"}),
             complete_json_calls: Mutex::new(0),
+            requests: Mutex::new(Vec::new()),
         };
         let messages = vec![LlmMessage::user("oversized advisory packet")];
 

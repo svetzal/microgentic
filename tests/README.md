@@ -1,5 +1,64 @@
 # In-process CLI coverage
 
+## Gateway request migration
+
+`src/cli/gateway_requests.rs` drives the real argument parser, dispatcher and
+public `run_agent` through the existing task-scoped `LlmGateway` double.
+`src/semantic_advisory.rs` exercises public `request_semantic_advisory` with its
+in-process structured-completion gateway. Neither replacement opens sockets,
+starts a provider, invokes Python, sleeps, or asserts wall-clock timing. The
+remaining `tests/omlx_gateway.rs` case is intentionally socket-free serialization
+coverage. The private server, HTTP reader, metadata polling, response encoders
+and process launch helpers from that file have been removed; shared support in
+`tests/support/provider.rs`, `terminal.rs` and `fixtures.rs` remains in use.
+
+Characterization of every case remaining before this migration:
+
+| Original `tests/omlx_gateway.rs` case | Preserved assertions and replacement evidence | Transport-only assertions retired |
+| --- | --- | --- |
+| `microgentic_and_legacy_entry_points_preserve_exact_provider_requests` | `modern_and_legacy_contract_requests_are_complete_and_equal`: both providers, malformed personal config ignored, Unicode guidance, explicit workspace, DONE, modern/legacy token and interaction aliases. Both complete requests match independent expectations, including literal `inspect-1` on assistant and tool result, then match across dispatch paths. Existing `benchmark_continuity` also fixes complete requests, packets and ledgers for contract/goal/sequential modes. | Executable startup and HTTP route/auth/framing; no claim of testing an old external executable. |
+| `saved_defaults_and_stdin_prompt_reach_the_public_worker_without_stdout_noise` | `saved_setup_and_unicode_stdin_keep_stdout_and_workspace_clean`: real setup persists provider/model/effort, piped multiline Unicode prompt equals explicit prompt and flags across complete gateway inputs, exact plain stdout, fixed completion controls, no management files in workspace, both providers. | OS stdin pipe plumbing and HTTP metadata/chat exchange. Intake is task-scoped at the I/O boundary. |
+| `built_worker_preserves_entry_stash_and_rejects_new_stash_both_providers` | `entry_stash_is_preserved_and_new_stash_rejects_done_both_providers`: real Git inventory and shell tool, entry inventory in gateway input, original object IDs survive unchanged, new stash forces repair input and FAIL, exact `stash-tool` IDs and rejection trace, both providers. Existing `run_outcomes` separately fixes withheld-stash outcome/exit policy. | Provider encoding of the shell tool response. |
+| `worker_effort_and_token_budgets_reach_omlx_on_the_wire` | `worker_efforts_and_both_token_flags_reach_the_gateway`: absent, disabled, low, medium, high, xhigh and enabled effort; both output-token aliases; exact complete requests including every completion control and descriptor, model, temperature and context. Trace packets separately fix provider-control mappings and exclude `test-key`. | HTTP `stream`, oMLX field placement and omission of Ollama fields; Mojentic owns those translations. |
+| `omlx_tool_results_survive_but_native_reasoning_is_only_traced` | `literal_ids_and_reasoning_survive_tools_and_outer_turns`: literal `inspect-1`, exact tool result, reasoning absent by default from complete subsequent requests and retained in trace. Covers both token aliases in the controls test. | SSE parsing and wire `tool_call_id` spelling. Normalized gateway messages carry the literal ID in `tool_calls`. |
+| `ollama_named_efforts_reach_the_wire_without_collapsing` | Direct Mojentic-only test deleted under the mission instruction. The worker effort test independently retains Microgentic's exact named/boolean/absent effort choices for both providers at its gateway boundary. | Entire direct `OllamaGateway::complete` HTTP test: no Microgentic behavior exercised. No fake is claimed to verify Mojentic's HTTP implementation. |
+| `native_reasoning_history_and_xhigh_round_trip` | Retained unchanged in `tests/omlx_gateway.rs`: native reasoning serialization, absence of `thinking`, xhigh deserialization. | None. |
+| `structured_advisories_use_omlx_output_budgets` | `semantic_advisory::tests::structured_advisory_preserves_complete_request_and_response`: public API, complete model/messages/schema/completion captured at gateway, 256 output tokens, 0.2 temperature, no effort/profile, zero tool iterations, accepted proposal returned. Existing advisory tests retain input-limit rejection before invocation and trace isolation. | oMLX JSON-schema HTTP encoding, wire-only field names/omissions. The gateway's structured method has no tools parameter. |
+| `native_reasoning_survives_tools_outer_turns_and_context_accounting` | `literal_ids_and_reasoning_survive_tools_and_outer_turns`: three complete independently specified requests, both providers, full transcript, retention off/on with and without qwen3.8 profile, two distinct reasoning sentinels and no aggregate assistant duplicate, exact reasoning character accounting in tool and outer-turn ledgers, preserve-thinking trace controls. | SSE reasoning delta decoding and provider-specific history field naming. |
+| `qwen_profile_rejects_high_before_connecting` | `qwen_profile_rejects_high_before_gateway_invocation`: actual dispatch returns unsupported-profile error for both providers, with no gateway request or metadata discovery. The driver returns the real error rather than fabricating an outcome/status. | Connection-refused sentinel address and subprocess error printing. |
+| `ollama_worker_preserves_native_reasoning_and_records_provider_controls` | Same full three-request reasoning matrix and effort test retain off/on behavior, exact model/context/output/temperature/effort, literal tool IDs and separate Ollama trace-control assertions. | NDJSON decoding, `thinking` wire name and absence of oMLX-only wire fields. |
+
+The already landed `cli::capped_reasoning` coverage below remains unchanged.
+Expected messages and tool descriptors reuse
+`tests/fixtures/benchmark_continuity.json` (`microgentic_benchmark_continuity.v1`,
+SHA-256 `510915b0d21f86f7263ff5c29399f6a0fd358fb00ac72af2ce5771df96eb31af`).
+Additional expected IDs, empty-tree results, continuation text, controls and
+optional native reasoning fields are literal test inputs; expectations are never
+copied from captures or masked. Complete gateway requests, rather than trace
+snapshots, establish request behavior. Traces additionally establish observability
+and context accounting. The sensitivity probe rejects a wrong literal assistant
+ID and passes with `inspect-1` restored.
+
+Focused verification: `cargo test --locked --lib cli::gateway_requests`,
+`cargo test --locked --lib semantic_advisory::tests`,
+`cargo test --locked --lib cli::capped_reasoning`,
+`cargo test --locked --lib cli::benchmark_continuity`, and
+`cargo test --locked --test omlx_gateway`. The full required test gate runs all
+of these. Run the gateway focus with `OMLX_API_KEY=test-key` to additionally check
+credential exclusion with the original sentinel configured in the environment.
+
+These are internal Microgentic regression specifications, not a new or changed
+cross-repository executable contract. Mojentic remains pinned by `Cargo.lock`
+at 3.0.1; no dependency sources or external repositories are changed. External
+provider verification is **not available here**: this suite does not verify
+Mojentic's HTTP serialization, auth, SSE/NDJSON decoding or provider-server
+behavior. Coordinating a shared versioned executable contract and provider-side
+verification in Mojentic remains necessary before claiming HTTP compatibility.
+The existing terminal-outcome cross-language contract and its Rust/Python gates
+remain unchanged.
+
+## Capped reasoning
+
 `src/cli/capped_reasoning.rs` replaces only
 `tests/omlx_gateway.rs::capped_partial_reasoning_is_not_retained_as_completed_native_history`.
 The test parses the compatibility executable's `run --experiment` arguments and

@@ -117,12 +117,24 @@ pub(super) fn execute_input(
     workspace: &Workspace,
     stdin: &[u8],
 ) -> Output {
+    execute_input_result(binary, args, provider, workspace, stdin).unwrap()
+}
+
+/// Preserve dispatch errors so rejection tests inspect the real error, not a
+/// synthetic process status or an outcome constructed by the test driver.
+pub(super) fn execute_input_result(
+    binary: &str,
+    args: &[&str],
+    provider: &ScriptedGateway,
+    workspace: &Workspace,
+    stdin: &[u8],
+) -> Result<Output> {
     let mut argv = vec![binary];
     if !args.contains(&"--config") {
         argv.extend(["--config", workspace.config.to_str().unwrap()]);
     }
     argv.extend_from_slice(args);
-    if !args.contains(&"--dir") {
+    if !args.contains(&"--dir") && !args.contains(&"setup") {
         argv.extend(["--dir", workspace.project.to_str().unwrap()]);
     }
     let cli =
@@ -154,13 +166,11 @@ pub(super) fn execute_input(
     );
     let everyday = binary != legacy_binary()
         && matches!(&cli.command, Some(Command::Run(run)) if run.experiment.is_none() && run.contract.is_none());
-    let code = runtime
-        .block_on(ACTIVE.scope(
-            io.clone(),
-            dispatch_cli(cli, binary == legacy_binary(), &mut stdout, &mut stderr),
-        ))
-        .unwrap();
-    if everyday {
+    let result = runtime.block_on(ACTIVE.scope(
+        io.clone(),
+        dispatch_cli(cli, binary == legacy_binary(), &mut stdout, &mut stderr),
+    ));
+    if everyday && result.is_ok() {
         assert_eq!(
             io.discoveries.load(Ordering::SeqCst),
             1,
@@ -185,11 +195,11 @@ pub(super) fn execute_input(
     {
         assert_eq!(summary["provider"], provider.wire.name());
     }
-    Output {
+    result.map(|code| Output {
         status: Status(code),
         stdout,
         stderr,
-    }
+    })
 }
 pub(super) fn stdout(output: &Output) -> String {
     String::from_utf8(output.stdout.clone()).expect("stdout is UTF-8")
