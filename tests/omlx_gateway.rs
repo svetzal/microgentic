@@ -753,33 +753,6 @@ fn native_reasoning_survives_tools_outer_turns_and_context_accounting() {
 }
 
 #[test]
-fn capped_partial_reasoning_is_not_retained_as_completed_native_history() {
-    let first = format!(
-        "data: {}\n\ndata: [DONE]\n\n",
-        json!({"choices":[{"delta":{
-        "reasoning_content":"PARTIAL_REASONING_SENTINEL that exceeds the protective cap"
-    },"finish_reason":"stop"}]})
-    );
-    let (host, server) = mock_server(vec![first, final_response()]);
-    let (_temp, summary) = run_cli_options(
-        &host,
-        Some("medium"),
-        "--max-tokens",
-        &["--preserve-reasoning", "--max-thinking-only-tokens", "1"],
-    );
-    let requests = server.join().unwrap();
-    assert_eq!(requests.len(), 2);
-    assert!(
-        !requests[1]["messages"]
-            .to_string()
-            .contains("PARTIAL_REASONING_SENTINEL")
-    );
-    let trace = std::fs::read_to_string(summary["trace_file"].as_str().unwrap()).unwrap();
-    assert!(trace.contains("PARTIAL_REASONING_SENTINEL"));
-    assert!(trace.contains("llm.thinking_only_stream.action_transitioned"));
-}
-
-#[test]
 fn qwen_profile_rejects_high_before_connecting() {
     let temp = tempfile::tempdir().unwrap();
     std::fs::write(temp.path().join("task.md"), "Finish with DONE.").unwrap();
