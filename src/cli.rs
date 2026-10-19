@@ -1613,3 +1613,6 @@ mod benchmark_continuity;
 
 #[cfg(test)]
 mod capped_reasoning;
+
+#[cfg(test)]
+mod gateway_requests;
