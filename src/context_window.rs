@@ -98,6 +98,13 @@ impl ContextWindow {
                 .await;
         }
         let gateway = metadata_gateway(provider);
+        #[cfg(all(
+            feature = "termination-test-provider",
+            microgentic_termination_test_build,
+            unix
+        ))]
+        let gateway = crate::tui_test_provider::gateway(tokio_util::sync::CancellationToken::new())
+            .unwrap_or(gateway);
         self.discover_within(gateway.get_model_context_window(model), DISCOVERY_TIMEOUT)
             .await
     }

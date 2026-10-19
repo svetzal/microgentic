@@ -1,0 +1,84 @@
+{
+  "version": "microgentic_tui_gateway.v1",
+  "request": {
+    "model": "test-model",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are Microgentic, a helpful conversational assistant with coding tools available.\nRespond to the user's message in the context of this conversation. No engineering task is assumed.\nGreetings, questions, explanations, and discussion can receive ordinary conversational replies without tools or validation.\nPerform work only when the user requests it, including clear follow-up authorization in the conversation. Discussed possibilities and quoted examples are not instructions to execute. Ask a concise question if the intended work is unclear.\nUse tools when the requested work or answer requires them. Do not inspect the project, create files, change code, or run commands just because this conversation is open.\nAll file tool paths and shell commands are rooted at the current project directory.\nWhen working on code, inspect relevant files before guessing their contents. Use bounded file reads and focused edits; preserve unrelated work and existing Git stashes.\nUse edit_file for existing source edits. Use write_file for new files, or for existing source only after reading the complete current file and preserving unrelated content.\nAfter source changes, obtain fresh deterministic validation before claiming the work is complete. Repair reported failures narrowly and rerun the appropriate check. Earlier conversation observations are not fresh validation.\nFor requested new projects, use the requested language and layout, and create an appropriate .gitignore. Do not assume Rust or create Cargo files without a request for that project.\nIgnore generated build, dependency, cache, and virtual-environment directories unless the request requires them.\nAnswer naturally with useful results, explanations, or concrete blockers. A visible conversational reply ends the exchange; DONE and FAIL tokens are not required.\nFor arithmetic with more than one trivial step, including sums, ratios, percentages and unit conversions, call calculate instead of working it out in your head, and use its results."
+      },
+      {
+        "role": "user",
+        "content": "Remember codename copperfern. Read memo.txt, then finish."
+      }
+    ],
+    "completion": "CompletionConfig { temperature: Some(1.0), num_ctx: Some(32768), max_tokens: Some(16384), top_p: None, top_k: None, response_format: None, reasoning_effort: Some(Low), reasoning_profile: None, preserve_reasoning: false, max_tool_iterations: 75 }",
+    "num_ctx": 32768,
+    "max_tokens": 16384,
+    "temperature": 1.0,
+    "effort": "Some(Low)"
+  },
+  "followup_messages": [
+    {
+      "role": "system",
+      "content": "You are Microgentic, a helpful conversational assistant with coding tools available.\nRespond to the user's message in the context of this conversation. No engineering task is assumed.\nGreetings, questions, explanations, and discussion can receive ordinary conversational replies without tools or validation.\nPerform work only when the user requests it, including clear follow-up authorization in the conversation. Discussed possibilities and quoted examples are not instructions to execute. Ask a concise question if the intended work is unclear.\nUse tools when the requested work or answer requires them. Do not inspect the project, create files, change code, or run commands just because this conversation is open.\nAll file tool paths and shell commands are rooted at the current project directory.\nWhen working on code, inspect relevant files before guessing their contents. Use bounded file reads and focused edits; preserve unrelated work and existing Git stashes.\nUse edit_file for existing source edits. Use write_file for new files, or for existing source only after reading the complete current file and preserving unrelated content.\nAfter source changes, obtain fresh deterministic validation before claiming the work is complete. Repair reported failures narrowly and rerun the appropriate check. Earlier conversation observations are not fresh validation.\nFor requested new projects, use the requested language and layout, and create an appropriate .gitignore. Do not assume Rust or create Cargo files without a request for that project.\nIgnore generated build, dependency, cache, and virtual-environment directories unless the request requires them.\nAnswer naturally with useful results, explanations, or concrete blockers. A visible conversational reply ends the exchange; DONE and FAIL tokens are not required.\nFor arithmetic with more than one trivial step, including sums, ratios, percentages and unit conversions, call calculate instead of working it out in your head, and use its results."
+    },
+    {
+      "role": "user",
+      "content": "Remember codename copperfern. Read memo.txt, then finish."
+    },
+    {
+      "role": "assistant",
+      "content": "Consolidated prior read_file results for unchanged files in this epoch.",
+      "tool_calls": [
+        {
+          "id": "harness-file-observation-24efbf7df0de9556",
+          "name": "read_file",
+          "arguments": {
+            "path": "memo.txt"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "[harness-consolidated-file-observation]\nMetadata: {\"schema_version\":\"file_observation.v3\",\"path\":\"memo.txt\",\"epoch\":0,\"source_read_count\":1,\"unique_read_signatures\":[\"f8a73575b22fb563\"],\"requested_ranges\":[{\"line_start\":1,\"line_end\":1}],\"historically_observed_ranges\":[{\"line_start\":1,\"line_end\":1}],\"retained_ranges\":[{\"line_start\":1,\"line_end\":1}],\"content_status\":\"complete\",\"missing_ranges\":[],\"content_budget_chars\":32768,\"total_lines\":1,\"line_number_width\":1,\"segments\":[{\"line_start\":1,\"line_end\":1,\"last_line_complete\":true,\"last_observed_sequence\":1}]}\nFile: memo.txt\nMutation epoch: 0\nStatus: complete\nRetained ranges: 1\nMissing ranges: none\nLine format: <absolute line>|<file content>; the prefix is display metadata, not file content.\n--- BEGIN LINE-NUMBERED CONTENT ---\n1|Codename copperfern. Unicode 世界.\n--- END LINE-NUMBERED CONTENT ---",
+      "tool_calls": [
+        {
+          "id": "harness-file-observation-24efbf7df0de9556",
+          "name": "read_file",
+          "arguments": {
+            "path": "memo.txt"
+          }
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": "Copperfern stored.\nDONE"
+    },
+    {
+      "role": "user",
+      "content": "What codename and Unicode did you see? Do not reread the file."
+    }
+  ],
+  "calculate": {
+    "type": "function",
+    "function": {
+      "name": "calculate",
+      "description": "Exact arithmetic. Do sums, ratios, percentages and conversions here instead of in your head; models make arithmetic slips. Pass one expression, or several separated by newlines or \";\"; a line such as \"total = 140+90\" names a value for later lines. Supports + - * / // % ^ and parentheses, sqrt abs round floor ceil min max ln log10 log2 exp, and pi e. Other names must be defined that way first. Example: {\"expression\": \"140+90+70\\n1474/1.1\"} returns \"140 + 90 + 70 = 300\" and \"1474 / 1.1 = 1340\".",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "expression": {
+            "type": "string",
+            "description": "One or more arithmetic expressions, separated by newlines or \";\"."
+          }
+        },
+        "required": [
+          "expression"
+        ]
+      }
+    }
+  }
+}
