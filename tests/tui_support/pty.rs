@@ -12,6 +12,7 @@
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use std::ffi::OsStr;
 use std::io::{Read, Write};
+use std::num::NonZeroU16;
 use std::path::Path;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
@@ -173,7 +174,7 @@ impl Launch {
         let writer = pair.master.take_writer().expect("terminal writer");
         let shared = Arc::new(Mutex::new(Shared {
             raw: Vec::new(),
-            parser: vt100::Parser::new(self.rows, self.cols, 0),
+            parser: vt100::Parser::new(screen_dimension(self.rows), screen_dimension(self.cols), 0),
             frames: Vec::new(),
             in_update: false,
             last_frame: None,
@@ -277,9 +278,15 @@ fn modes(master: &dyn MasterPty) -> Option<[libc::tcflag_t; 3]> {
 pub struct Snapshot(vt100::Screen);
 
 impl Snapshot {
+    /// The screen's rows and columns.
+    fn size(&self) -> (u16, u16) {
+        let (rows, cols) = self.0.size();
+        (rows.get(), cols.get())
+    }
+
     /// Row `row`, with trailing blanks removed.
     pub fn row(&self, row: u16) -> String {
-        let (_, cols) = self.0.size();
+        let (_, cols) = self.size();
         self.0
             .rows(0, cols)
             .nth(usize::from(row))
@@ -289,7 +296,7 @@ impl Snapshot {
     }
 
     pub fn rows(&self) -> Vec<String> {
-        let (rows, _) = self.0.size();
+        let (rows, _) = self.size();
         (0..rows).map(|row| self.row(row)).collect()
     }
 
@@ -300,7 +307,7 @@ impl Snapshot {
     /// Every row from column `col` to the right edge, with trailing blanks
     /// removed, for a pane that sits beside other text.
     pub fn columns_from(&self, col: u16) -> Vec<String> {
-        let (_, cols) = self.0.size();
+        let (_, cols) = self.size();
         self.0
             .rows(col, cols.saturating_sub(col))
             .map(|row| row.trim_end().to_owned())
@@ -313,7 +320,7 @@ impl Snapshot {
 
     /// The first row and column where `needle` starts.
     pub fn locate(&self, needle: &str) -> Option<(u16, u16)> {
-        let (rows, cols) = self.0.size();
+        let (rows, cols) = self.size();
         for row in 0..rows {
             let mut text = String::new();
             let mut starts = Vec::new();
@@ -353,6 +360,11 @@ impl std::fmt::Display for Snapshot {
         }
         Ok(())
     }
+}
+
+/// A screen dimension for `vt100`, which rejects an empty screen.
+fn screen_dimension(cells: u16) -> NonZeroU16 {
+    NonZeroU16::new(cells).expect("a terminal needs at least one row and column")
 }
 
 /// A named 256-colour index, as crossterm writes ANSI colours.
@@ -478,7 +490,7 @@ impl Tui {
             .expect("terminal state")
             .parser
             .screen_mut()
-            .set_size(rows, cols);
+            .set_size(screen_dimension(rows), screen_dimension(cols));
     }
 
     /// Wait for the binary to exit, and return whether it succeeded.
