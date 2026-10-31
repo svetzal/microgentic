@@ -10,6 +10,13 @@ The release workflow publishes each version's section as its GitHub release note
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-31
+
+Everyday `run` now hands engineering work to an engineering subagent through
+`start_task`, and `--agent` lets a run or conversation work as an agent
+definition file, such as a Claude Code craftsperson agent. Task-mode prompts no
+longer assume a Rust project. Everyday and benchmark provider requests change.
+
 ### Added
 
 - Everyday `run` offers the model a `start_task` tool for engineering work that
@@ -48,7 +55,6 @@ The release workflow publishes each version's section as its GitHub release note
 
 - Everyday `run` provider requests carry the `start_task` tool descriptor and
   one more line of system guidance.
-
 - Task-mode prompts (benchmark runs and `run --goal`/`run --contract`) no
   longer assume a Rust project built with Cargo. The system prompt and the
   first task message now speak of the project root, project files, a first
@@ -60,6 +66,13 @@ The release workflow publishes each version's section as its GitHub release note
 - Benchmark provider requests change as a result. Earlier benchmark baselines
   are not request-identical to this version; the continuity fixture was
   re-recorded.
+- Repository tests run in-process against gateway and transport doubles,
+  with no real network connections, sockets or local servers. Executable
+  termination and TUI checks use a `termination-test-provider` Cargo feature
+  that only debug builds can expose; release binaries never contain it.
+- Dependencies updated: tokio 1.54.1, tokio-util 0.7.20, ignore 0.4.34,
+  unicode-width 0.2.3, rustls-webpki 0.103.16, webpki-root-certs 1.0.10, and
+  (for tests) vt100 0.18.
 
 ## [0.6.0] - 2026-10-18
 
@@ -365,7 +378,8 @@ experimental harness into a small terminal interface for everyday use.
 - A successful process exit still needs inspection of the native terminal
   result when classifying benchmark outcomes.
 
-[Unreleased]: https://github.com/svetzal/microgentic/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/svetzal/microgentic/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/svetzal/microgentic/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/svetzal/microgentic/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/svetzal/microgentic/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/svetzal/microgentic/compare/v0.3.0...v0.4.0
