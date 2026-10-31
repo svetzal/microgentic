@@ -23,6 +23,15 @@ that the model created and did not resolve, or a stash that disappeared, holds
 the ending back, and the model is told. Microgentic never applies, pops, or
 drops a stash itself. Stashes that existed before the work are left alone.
 
+## Engineering tasks
+
+`run` gives the model a `start_task` tool. It hands engineering work to an
+engineering agent with a brief: a `goal`, and optionally `context`,
+`constraints`, and `checks`, the shell commands that must pass. A check that
+hides its own failure, such as `cargo test || true`, or an empty check, is
+refused, and the model is told why. See
+[Engineering work in a separate task](shell.md#engineering-work-in-a-separate-task).
+
 ## Calculator
 
 Small models make arithmetic mistakes, so the conversation and `run` give the

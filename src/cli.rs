@@ -320,6 +320,7 @@ impl RunArgs {
             calculator: false,
             project_guidance: false,
             user_guidance_file: None,
+            start_task: crate::start_task::StartTaskMode::Off,
         })
     }
 }
@@ -1443,6 +1444,13 @@ fn prepare_run_with_mode(
         )
     });
     config.calculator = everyday;
+    // Everyday `run` hands engineering work to the subagent at once. The TUI
+    // conversation does not offer it until the user can approve the brief.
+    config.start_task = if !conversational && !legacy && !advanced {
+        crate::start_task::StartTaskMode::Immediate
+    } else {
+        crate::start_task::StartTaskMode::Off
+    };
     config.project_guidance = everyday && !no_project_guidance;
     if config.project_guidance {
         config.user_guidance_file = crate::preferences::config_path(config_path)?
@@ -1607,6 +1615,9 @@ mod run_report;
 
 #[cfg(test)]
 mod everyday_runs;
+
+#[cfg(test)]
+mod start_task_runs;
 
 #[cfg(test)]
 mod benchmark_continuity;

@@ -41,6 +41,11 @@ example `run-20261017T093005.123456789Z.jsonl`. Names sort in start order. If
 two runs start at the same instant in one directory, the later one adds `_01`,
 `_02`, and so on. A run never replaces an existing trace file.
 
+A task that `run` starts with `start_task` writes its own trace. It is in
+`task-<n>/traces/` in the run's directory below the run-state directory, beside
+the task's `contract.json`. The run's trace gives these locations in its
+`subagent.task.started` and `subagent.task.finished` events.
+
 ## Summarize traces
 
 ```sh

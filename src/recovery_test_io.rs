@@ -381,6 +381,7 @@ fn config(root: &std::path::Path) -> AgentRunConfig {
         calculator: false,
         project_guidance: false,
         user_guidance_file: None,
+        start_task: crate::start_task::StartTaskMode::Off,
     }
 }
 fn workspace() -> (tempfile::TempDir, Arc<RecoveryIo>) {

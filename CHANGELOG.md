@@ -10,7 +10,27 @@ The release workflow publishes each version's section as its GitHub release note
 
 ## [Unreleased]
 
+### Added
+
+- Everyday `run` offers the model a `start_task` tool for engineering work that
+  changes the project. The model gives a goal, and optionally context from the
+  prompt, constraints, and shell commands that must pass. The task starts at
+  once in an engineering subagent, the task-mode loop that benchmark runs use:
+  the brief becomes the plain-text guidance of an explicit run contract, and
+  the commands become its probes. A check that masks its own failure, or an
+  empty check, is refused as a tool error. The subagent's outcome, summary,
+  changes, checks, and trace file return as the tool result. The run's trace
+  records the brief in `subagent.task.started` and links the subagent's own
+  trace in `subagent.task.finished`. The subagent uses the same provider,
+  model, settings, budgets, project guidance, and context window, and keeps
+  its contract and trace in the run's state directory. The TUI conversation,
+  task runs, benchmark runs, and the compatibility executable do not offer
+  the tool; their provider requests are unchanged.
+
 ### Changed
+
+- Everyday `run` provider requests carry the `start_task` tool descriptor and
+  one more line of system guidance.
 
 - Task-mode prompts (benchmark runs and `run --goal`/`run --contract`) no
   longer assume a Rust project built with Cargo. The system prompt and the
