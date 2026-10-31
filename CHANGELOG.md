@@ -26,6 +26,18 @@ The release workflow publishes each version's section as its GitHub release note
   its contract and trace in the run's state directory. The TUI conversation,
   task runs, benchmark runs, and the compatibility executable do not offer
   the tool; their provider requests are unchanged.
+- `run --agent <name|path>` loads an agent file, such as a Claude Code agent
+  definition, into the system context. A name is looked up in `agents/`
+  beside the configuration file, then in `~/.claude/agents/`; a value with
+  `/` or ending in `.md` is a path. Only the frontmatter `name` is read; other
+  keys such as `tools` and `model` are ignored, because an agent file is
+  information, not authority. The engineering subagent gets the whole file,
+  before project guidance; the coordinator gets one line naming the agent.
+  The body is limited to 6,000 estimated tokens, or a quarter of a smaller
+  known context window, and a larger file stops the run before it starts.
+  Each trace records `context.agent.loaded`. Benchmark runs, advanced runs,
+  `run-sequential`, and the compatibility executable refuse `--agent`; runs
+  without it send unchanged provider requests.
 
 ### Changed
 

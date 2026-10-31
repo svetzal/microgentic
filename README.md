@@ -87,7 +87,7 @@ executable never read personal settings. See
 ## Documentation
 
 The [user guide](https://vetzal.ca/microgentic/) covers install, setup, the
-conversation, shell use, providers, project guidance, tools, commands, file
+conversation, shell use, providers, project guidance, agent files, tools, commands, file
 locations, traces, benchmark mode, and research controls. Its source is in
 [`book/src/`](book/src/). Other documents:
 
@@ -111,6 +111,7 @@ cargo clippy --all-targets -- -D warnings
 The end-to-end tests are Rust and run under `cargo test`. `tests/tui.rs`
 drives the real TUI in a pseudo-terminal and reads the rendered screen.
 `src/cli/everyday_runs.rs` covers the calculator tool and project guidance.
+`src/cli/agent_runs.rs` covers `--agent` agent files.
 `src/cli/benchmark_continuity.rs` checks benchmark and legacy task dispatch
 against fixed complete gateway requests, assembled packets and context ledgers.
 These CLI suites use an in-process gateway double. The TUI and termination

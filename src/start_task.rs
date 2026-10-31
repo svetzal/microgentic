@@ -480,6 +480,7 @@ mod tests {
             project_guidance: false,
             user_guidance_file: None,
             start_task: StartTaskMode::Off,
+            agent: None,
         }
     }
 

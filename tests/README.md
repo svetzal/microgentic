@@ -436,6 +436,26 @@ repository's required gates. No external provider verification is claimed.
 The TUI migration below completes removal of that server and terminal support.
 Registered Python recovery/progress harnesses and experiment inputs are unchanged.
 
+## Agent files
+
+`src/cli/agent_runs.rs` drives `run --agent` and the conversation worker through
+the real parser and dispatcher with the task-scoped gateway double. Each case
+compares complete gateway requests from the same scripted journey with and
+without `--agent`: the requests must be equal except for the system message,
+which must equal the request without the flag plus the expected agent text,
+inserted before the project guidance heading. The everyday coordinator gets the
+one-line subagent note; the engineering subagent and the conversation worker
+get the whole section. Both traces' `context.agent.loaded` payloads are compared
+whole. Rejection cases (benchmark, advanced, `run-sequential`, compatibility
+executable, unknown name, missing file, over-budget body) assert the exact error,
+no gateway request and no trace. Requests without `--agent` stay pinned by the
+existing literal everyday expectations in `cli::gateway_requests` and the
+unchanged `microgentic_benchmark_continuity.v1` fixture. Agent files live in
+temporary directories beside the workspace's configuration file; name lookup
+can also read the developer's `~/.claude/agents/`, so the unknown-name case
+uses a name that cannot exist there and asserts only the configuration
+directory's listing exactly. Run `cargo test --locked --lib cli::agent_runs`.
+
 ## Benchmark continuity
 
 `src/cli/benchmark_continuity.rs` replaces `tests/benchmark_continuity.rs`.

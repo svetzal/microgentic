@@ -17,6 +17,8 @@ did.
   (`run.workspace.baseline`), and in `run.finished`, the files that the run
   changed and the checks that passed, failed, or did not run
 - the project guidance that was discovered and delivered
+- the [agent file](agents.md) loaded with `--agent`, if any, and whether that
+  run got the whole file or a one-line note (`context.agent.loaded`)
 - the model's context window and where it came from: your
   `--context-window-tokens`, the provider, or Microgentic's model table
 - for each request, the time to the first token, what kind of token it was
