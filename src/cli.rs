@@ -101,6 +101,13 @@ struct RunArgs {
     #[arg(long)]
     no_project_guidance: bool,
 
+    /// Work as the agent an agent definition file describes: a name, looked up
+    /// in `agents/` beside the configuration file and then in
+    /// `~/.claude/agents/`, or a path to a Markdown file. The file is
+    /// information; it never changes tools, validation, model or stop rules.
+    #[arg(long, value_name = "NAME|PATH")]
+    agent: Option<String>,
+
     /// Advanced: contract/goal base directory; independent of the tool root (--dir).
     #[arg(long, help_heading = "Advanced / research")]
     experiment: Option<PathBuf>,
@@ -321,6 +328,7 @@ impl RunArgs {
             project_guidance: false,
             user_guidance_file: None,
             start_task: crate::start_task::StartTaskMode::Off,
+            agent: None,
         })
     }
 }
@@ -863,6 +871,7 @@ fn command_definition() -> clap::Command {
             .mut_arg("experiment", |arg| arg.required(true))
             .mut_arg("prompt", |arg| arg.hide(true))
             .mut_arg("json", |arg| arg.hide(true))
+            .mut_arg("agent", |arg| arg.hide(true))
             .mut_arg("goal", |arg| {
                 arg.conflicts_with(clap::builder::Resettable::<clap::Id>::Reset).default_value("task.md")
             })
@@ -1030,6 +1039,11 @@ async fn dispatch_cli(
             }
         },
         Command::RunSequential(args) => {
+            if args.run.agent.is_some() {
+                return Err(usage_error(
+                    "run-sequential does not accept --agent; use it with microgentic run or the conversation",
+                ));
+            }
             let summary = run_sequential(SequentialRunConfig {
                 agent: prepare_run(args.run, cli.config.as_deref(), legacy)?,
                 artifact: args.artifact,
@@ -1288,6 +1302,9 @@ fn prepare_benchmark_run(mut run: RunArgs) -> Result<AgentRunConfig> {
     if run.no_project_guidance {
         bail!("benchmark mode never reads project guidance; remove --no-project-guidance");
     }
+    if run.agent.is_some() {
+        bail!("benchmark mode never loads an agent file; remove --agent");
+    }
     if run.prompt.is_some() {
         bail!(
             "benchmark mode reads task files; use --goal task.md or --contract contract.json instead of --prompt"
@@ -1329,6 +1346,22 @@ fn prepare_run_with_mode(
         return Err(usage_error("--dir must name a project directory"));
     }
     let advanced = run.experiment.is_some() || run.goal.is_some() || run.contract.is_some();
+    // The agent file is read now, before stdin or any run state, so a bad
+    // name or file stops the run before it starts.
+    let agent = match run.agent.take() {
+        None => None,
+        Some(_) if advanced => {
+            return Err(usage_error(
+                "--agent applies to everyday runs and the conversation; remove --experiment, --goal and --contract, or remove --agent",
+            ));
+        }
+        Some(_) if legacy && !conversational => {
+            return Err(usage_error(
+                "the adaptive-agent-harness compatibility executable does not accept --agent; use microgentic run --agent",
+            ));
+        }
+        Some(value) => Some(load_agent(&value, config_path)?),
+    };
     // Everyday runs and the conversation reply naturally, with the calculator
     // and project guidance; advanced and historical invocations keep their
     // exact task requests.
@@ -1433,6 +1466,7 @@ fn prepare_run_with_mode(
     let no_project_guidance = run.no_project_guidance;
     let explicit_window = run.context_window_tokens;
     let mut config = run.into_config()?;
+    config.agent = agent;
     config.conversational = everyday;
     // Everyday runs account against a known window, asking the provider
     // before the run; the explicit flag and the model table come first and
@@ -1458,6 +1492,23 @@ fn prepare_run_with_mode(
             .map(|directory| directory.join("AGENTS.md"));
     }
     Ok(config)
+}
+
+/// Resolve and read an `--agent` value: a path relative to the working
+/// directory, or a name searched for beside the configuration file and then
+/// in `~/.claude/agents/`. Problems are usage errors.
+pub(crate) fn load_agent(
+    value: &str,
+    config_path: Option<&Path>,
+) -> Result<crate::agent_file::AgentFile> {
+    let config_dir = crate::preferences::config_path(config_path)?
+        .parent()
+        .map(Path::to_path_buf);
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let search = crate::agent_file::search_dirs(config_dir.as_deref(), home.as_deref());
+    crate::agent_file::resolve(value, &std::env::current_dir()?, &search)
+        .and_then(|path| crate::agent_file::load(&path))
+        .map_err(|error| usage_error(&format!("{error:#}")))
 }
 
 fn setup(args: SetupArgs, explicit_path: Option<&Path>) -> Result<()> {
@@ -1618,6 +1669,9 @@ mod everyday_runs;
 
 #[cfg(test)]
 mod start_task_runs;
+
+#[cfg(test)]
+mod agent_runs;
 
 #[cfg(test)]
 mod benchmark_continuity;

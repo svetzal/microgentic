@@ -13,6 +13,9 @@ Every command has `--help`, with examples.
 
 All commands accept `--config <path>` to read settings from a different file.
 
+`microgentic run --agent <name|path>` loads an agent file that describes how to
+approach the work. See [Agent files](agents.md).
+
 ## Traces
 
 | Command | What it does |

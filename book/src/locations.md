@@ -7,6 +7,7 @@ directory conventions.
 | --- | --- |
 | Settings | `$XDG_CONFIG_HOME/microgentic/config.json`, or `~/.config/microgentic/config.json` |
 | Personal guidance | `$XDG_CONFIG_HOME/microgentic/AGENTS.md`, or `~/.config/microgentic/AGENTS.md` |
+| Agent files for `--agent` | `$XDG_CONFIG_HOME/microgentic/agents/`, or `~/.config/microgentic/agents/`, then `~/.claude/agents/` |
 | Runs, traces, and conversations | `$XDG_STATE_HOME/microgentic/runs`, or `~/.local/state/microgentic/runs` |
 
 Each `run` and each conversation has its own directory below `runs`. A

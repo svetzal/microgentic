@@ -163,6 +163,13 @@ pub struct AgentRunConfig {
     /// subagent. Everyday `run` starts the task at once; every other mode,
     /// and the subagent itself, leaves it off.
     pub start_task: crate::start_task::StartTaskMode,
+    /// An agent definition loaded with `--agent`: text that describes how to
+    /// approach the work, never authority over tools, validation, model or
+    /// stop rules. A loop that does the work gets its whole body; a
+    /// coordinator that delegates through `start_task` gets one line naming
+    /// it, and its subagent inherits the file. `None` leaves every request
+    /// unchanged. Benchmark and historical runs never set it.
+    pub agent: Option<crate::agent_file::AgentFile>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -619,8 +626,6 @@ async fn run_agent_with_gateway_inner<G: LlmGateway + ?Sized>(
     let conversational = config.conversational || conversation.is_some();
     let residency_settings =
         crate::residency::Settings::with(config.standing_context_limit, config.guidance_fraction);
-    let trace =
-        TraceRecorder::create_for_conversation(&trace_dir, conversation.clone(), conversational)?;
     // Ollama runs each request with the num_ctx it is sent, so that bounds
     // the window Microgentic accounts against.
     let context_window = config
@@ -630,6 +635,17 @@ async fn run_agent_with_gateway_inner<G: LlmGateway + ?Sized>(
             Provider::Ollama => window.within_num_ctx(requested_num_ctx(&completion_config)),
             Provider::Omlx => window,
         });
+    // Accounting uses the known window; `num_ctx` and run policies keep
+    // `context_window_tokens`.
+    let accounting_window_tokens = context_window
+        .as_ref()
+        .map_or(config.context_window_tokens, |window| window.tokens);
+    // An agent file too large for this window stops the run before it starts.
+    if let Some(agent) = &config.agent {
+        agent.check_budget(accounting_window_tokens)?;
+    }
+    let trace =
+        TraceRecorder::create_for_conversation(&trace_dir, conversation.clone(), conversational)?;
     let trace = Arc::new(match &context_window {
         Some(window) => trace.with_residency(crate::residency::Residency::new(
             window.clone(),
@@ -637,11 +653,6 @@ async fn run_agent_with_gateway_inner<G: LlmGateway + ?Sized>(
         )),
         None => trace,
     });
-    // Accounting uses the known window; `num_ctx` and run policies keep
-    // `context_window_tokens`.
-    let accounting_window_tokens = context_window
-        .as_ref()
-        .map_or(config.context_window_tokens, |window| window.tokens);
     if let Some(session) = &conversation {
         trace.event(
             "session.context.retained",
@@ -937,6 +948,21 @@ async fn run_agent_with_gateway_inner<G: LlmGateway + ?Sized>(
                 started: Default::default(),
             },
         )));
+    }
+    // An agent file, like project guidance, is text in the system context
+    // and changes nothing else. It comes before project guidance, which is
+    // more specific and wins where the two conflict.
+    if let Some(agent) = &config.agent {
+        let delivery = if config.start_task == crate::start_task::StartTaskMode::Immediate {
+            crate::agent_file::Delivery::SubagentNote
+        } else {
+            crate::agent_file::Delivery::FullSection
+        };
+        system_prompt.push_str(&agent.system_text(delivery));
+        trace.event(
+            crate::agent_file::LOADED_EVENT,
+            agent.trace_payload(delivery, accounting_window_tokens),
+        )?;
     }
     // Project guidance is text in the system context. It is read after the
     // tool set is fixed and never changes tools, permissions or stop policy.
@@ -9643,6 +9669,7 @@ mod tests {
             project_guidance: false,
             user_guidance_file: None,
             start_task: crate::start_task::StartTaskMode::Off,
+            agent: None,
         };
         let error = anyhow::anyhow!("HTTP error: unexpected EOF during chunk size line");
 
@@ -11399,6 +11426,7 @@ mod tests {
                     project_guidance: false,
                     user_guidance_file: None,
                     start_task: crate::start_task::StartTaskMode::Off,
+                    agent: None,
                 },
                 gateway,
                 self.workspace.clone(),
@@ -11448,6 +11476,7 @@ mod tests {
                     project_guidance: false,
                     user_guidance_file: None,
                     start_task: crate::start_task::StartTaskMode::Off,
+                    agent: None,
                 },
                 gateway,
                 self.workspace.clone(),
@@ -11503,6 +11532,7 @@ mod tests {
                 project_guidance: false,
                 user_guidance_file: None,
                 start_task: crate::start_task::StartTaskMode::Off,
+                agent: None,
             }
         }
 
@@ -11582,6 +11612,7 @@ mod tests {
                     project_guidance: false,
                     user_guidance_file: None,
                     start_task: crate::start_task::StartTaskMode::Off,
+                    agent: None,
                 },
                 gateway,
                 self.workspace.clone(),
@@ -11630,6 +11661,7 @@ mod tests {
                     project_guidance: false,
                     user_guidance_file: None,
                     start_task: crate::start_task::StartTaskMode::Off,
+                    agent: None,
                 },
                 gateway,
                 self.workspace.clone(),
@@ -11678,6 +11710,7 @@ mod tests {
                     project_guidance: false,
                     user_guidance_file: None,
                     start_task: crate::start_task::StartTaskMode::Off,
+                    agent: None,
                 },
                 gateway,
                 self.workspace.clone(),
@@ -11722,6 +11755,7 @@ mod tests {
                     project_guidance: false,
                     user_guidance_file: None,
                     start_task: crate::start_task::StartTaskMode::Off,
+                    agent: None,
                 },
                 gateway,
                 self.workspace.clone(),

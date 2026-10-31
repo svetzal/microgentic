@@ -10,6 +10,7 @@
 - [Shell use with `run`](shell.md)
 - [Providers and models](providers.md)
 - [Project guidance](guidance.md)
+- [Agent files](agents.md)
 - [Tools](tools.md)
 
 # Reference

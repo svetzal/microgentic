@@ -44,6 +44,13 @@ file and how much was left out.
 Microgentic sets the tools, permissions, validation, and stop rules before it
 reads guidance. Guidance text cannot change them.
 
+## Guidance and agent files
+
+An [agent file](agents.md) loaded with `--agent` describes how to approach the
+work. It comes before project guidance in the system context. When the two
+disagree, project guidance is more specific and wins. `--no-project-guidance`
+does not remove an agent file.
+
 ## See what loaded
 
 - In the conversation, `/guidance` lists the files with their size and status.

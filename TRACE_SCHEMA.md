@@ -175,6 +175,26 @@ lifecycle events for its requests go to its own trace while it runs. A brief
 that fails validation (no goal, an empty check, a check that masks failure)
 is a tool error and records neither event.
 
+## Agent files
+
+A run started with `--agent` records one `context.agent.loaded` event, after
+`run.started` and before any provider request. Runs without `--agent`,
+benchmark runs and the compatibility executable never record it.
+
+The payload has `schema_version` (`agent_file.v1`), `path` (the absolute path
+read), `name` (the frontmatter `name`, or the file stem), `sha256` and `bytes`
+of the whole file, `estimated_tokens` of the body after the frontmatter,
+`budget_tokens` (the limit that body was checked against: 6,000, or a quarter
+of a smaller known window, never under 500), `ignored_frontmatter_keys` (every
+frontmatter key other than `name`, in file order; none is honored), and
+`delivery`. `delivery` is `full_section` when the loop's system context holds
+the whole body, or `subagent_note` when it holds one line naming the agent:
+everyday `run`'s coordinator, which delegates through `start_task`, gets the
+note, and the engineering subagent's own trace records `full_section`.
+
+A body over its budget stops the run before its trace is created, so there is
+no event for a refused file.
+
 ## Context window and residency
 
 Everyday `run` and the conversation record these; benchmark runs do not, so
