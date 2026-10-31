@@ -523,9 +523,38 @@ gateway still needs recovery, reasoning, telemetry, and tool-history conformance
   commands, and outcomes to CLI and TUI. Keep provider calls, validation,
   context policy, and stop authority in the runtime. Adapt existing trace events
   rather than parse display strings or build another work loop.
+- [ ] **Nest engineering work under the conversation.** Decided on 2026-10-31:
+  the conversation is a coordinator, and engineering runs in a subagent whose
+  only input is a run contract: plain-text guidance plus optional probes and
+  scopes (see `CHARTER.md`). Benchmark mode hands its contract straight to that
+  subagent. Today everyday mode is one blended loop whose engineering
+  gates switch on when the model writes, and benchmark task mode is a separate
+  loop with its own prompts, stop rule, tools, and context accounting. Slices,
+  each landing on its own:
+  - [ ] Make the task loop general. Remove the Rust-specific and "benchmark
+    task" wording from the task prompts. This deliberately breaks request
+    continuity with historical runs; record a new continuity baseline.
+  - [ ] Add `start_task` to the conversation. Structured fields help the user
+    think the work through, and the user reviews the brief. The coordinator
+    writes a run contract: goal and relevant context become guidance, success
+    checks become probes, and any agreed limits become scopes. The subagent's
+    outcome, changes, and checks return as the tool result. Link the subagent
+    trace from the coordinator trace.
+  - [ ] Remove the blended loop. The coordinator keeps inspection tools and
+    loses write tools, so all write gates belong to the subagent. Reduce the
+    `conversational`, `calculator`, and `project_guidance` flags to coordinator
+    and subagent settings.
+  - Open: contract `profile` (`coding`, `terminal`, `text_transform`) selects
+    its own system guidance, tools, and task template, which is a further set
+    of loop variants. Decide whether profiles become distinct subagent kinds or
+    go away.
+  - Open: contract `budgets`, `terminal`, `evidence_invalidation`, and
+    `mutable_artifact_classes` are validated and traced but never consulted by
+    the loop. Wire them up or remove them.
 - [ ] **Support follow-up requests.** Carry corrections into the current task,
   preserve completed work and acceptance criteria, and acknowledge steering.
-  Define when a message changes the goal or starts a new task.
+  Define when a message changes the goal or starts a new task (`start_task`
+  answers the second part once engineering is nested).
 - [ ] **Persist recoverable sessions.** Store unique IDs, resolved config,
   contract, conversation/context state, pending approvals, mutation epoch,
   probes, and outcome. A trace or final summary alone is not a resume checkpoint.

@@ -18,9 +18,13 @@ not the design target.
 
 - Bare `microgentic` starts an ongoing conversation with no assumed work.
 - `run` reads a prompt from stdin or `--prompt` and participates in shell pipes.
-- `benchmark run` and `benchmark run-sequential` retain isolated task behavior.
-- Preserve benchmark contracts, validation authority, model controls, and stop
-  rules when changing presentation. Compare exact provider requests when needed.
+- `benchmark run` and `benchmark run-sequential` hand their run contract
+  straight to the engineering subagent, isolated from conversation. The
+  coordinator's `start_task` runs the same subagent. Do not give benchmark mode
+  loop behavior of its own (see `CHARTER.md`; the migration is in
+  `PUBLIC_READINESS.md`).
+- Preserve validation authority, model controls, and stop rules when changing
+  presentation. Compare exact provider requests when needed.
 - Keep user preferences, stdin intake, and TUI history out of benchmark mode.
 - Confine benchmark integration changes to adapters or `microgentic benchmark`.
   Benchmark-specific operation must not change everyday `run`, the TUI, or
