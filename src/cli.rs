@@ -69,19 +69,24 @@ pub(crate) fn parse_reasoning_effort(
     name = "microgentic",
     version,
     about = "An adaptive coding agent optimized for small models",
-    after_help = "Examples:\n  microgentic\n  microgentic setup\n  echo 'Hello!' | microgentic run\n  microgentic run --prompt 'Fix the parser'\n\nRun uses the existing agent tool and validation policies and can edit the selected project."
+    after_help = "Examples:\n  microgentic\n  microgentic --agent reviewer\n  microgentic setup\n  echo 'Hello!' | microgentic run\n  microgentic run --prompt 'Fix the parser'\n\nRun uses the existing agent tool and validation policies and can edit the selected project."
 )]
 struct Cli {
     /// User configuration file (default: $XDG_CONFIG_HOME/microgentic/config.json).
     #[arg(long, global = true)]
     config: Option<PathBuf>,
+    /// Work as the agent an agent definition file describes, for the whole
+    /// conversation: a name, looked up in `agents/` beside the configuration
+    /// file and then in `~/.claude/agents/`, or a path to a Markdown file.
+    #[arg(long, value_name = "NAME|PATH")]
+    agent: Option<String>,
     #[command(subcommand)]
     command: Option<Command>,
 }
 
 #[derive(Debug, Args)]
 #[command(
-    after_help = "Examples:\n  echo 'Hello!' | microgentic run\n  microgentic run --prompt 'Fix the parser' --dir .\n  microgentic run --prompt 'Review this diff' < changes.diff\n\nRun can edit files and execute project commands under the existing runtime policy. Research controls retain their previous meanings. Wire recovery is disabled by default. SIGINT, SIGTERM and SIGHUP cancel the run and persist terminal request evidence; a run that has not stopped two seconds later ends without it."
+    after_help = "Examples:\n  echo 'Hello!' | microgentic run\n  microgentic run --prompt 'Fix the parser' --dir .\n  microgentic run --prompt 'Review this diff' < changes.diff\n  microgentic run --agent ./agents/reviewer.md --prompt 'Review this diff' < changes.diff\n\nRun can edit files and execute project commands under the existing runtime policy. Research controls retain their previous meanings. Wire recovery is disabled by default. SIGINT, SIGTERM and SIGHUP cancel the run and persist terminal request evidence; a run that has not stopped two seconds later ends without it."
 )]
 struct RunArgs {
     /// Prompt. When omitted, read from piped or redirected stdin.
@@ -955,12 +960,24 @@ async fn dispatch_cli(
     stderr: &mut (dyn Write + Send),
 ) -> Result<ExitCode> {
     let Some(command) = cli.command else {
+        // The agent file is read once, before the conversation opens, so a
+        // bad name or file is reported on an ordinary terminal.
+        let agent = cli
+            .agent
+            .as_deref()
+            .map(|value| load_agent(value, cli.config.as_deref()))
+            .transpose()?;
         if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
             bail!("interactive mode needs a terminal; try: echo 'Hello!' | microgentic run");
         }
-        crate::tui::run(cli.config).await?;
+        crate::tui::run(cli.config, agent).await?;
         return Ok(ExitCode::SUCCESS);
     };
+    if cli.agent.is_some() {
+        return Err(usage_error(
+            "--agent before a command applies only to the conversation; give it after the command, as in microgentic run --agent <name|path>",
+        ));
+    }
     match command {
         Command::Setup(args) => setup(args, cli.config.as_deref())?,
         Command::Run(run) => {

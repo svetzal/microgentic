@@ -139,9 +139,23 @@ fn launch_tui(
     rows: u16,
     cols: u16,
 ) -> Tui {
-    let mut launch = Launch::new(binary)
-        .arg("--config")
-        .arg(&workspace.config)
+    launch_tui_with(binary, workspace, provider, rows, cols, &[])
+}
+
+/// `launch_tui` with extra top-level arguments.
+fn launch_tui_with(
+    binary: &str,
+    workspace: &Workspace,
+    provider: &ScriptedGateway,
+    rows: u16,
+    cols: u16,
+    args: &[&str],
+) -> Tui {
+    let mut launch = Launch::new(binary).arg("--config").arg(&workspace.config);
+    for arg in args {
+        launch = launch.arg(arg);
+    }
+    let mut launch = launch
         .cwd(&workspace.project)
         .size(rows, cols)
         .env("XDG_STATE_HOME", &workspace.state)
@@ -1144,6 +1158,77 @@ fn status_bar(wire: Wire, model: &str, in_git: bool) {
         );
     }
     tui.quit();
+}
+
+// ---------------------------------------------------------------- agent files
+
+/// `microgentic --agent` names the agent in the status bar, reports it with
+/// `/agent`, and every worker request carries the whole file.
+fn agent_file(wire: Wire) {
+    let workspace = Workspace::new();
+    workspace.write("AGENTS.md", "ROOT-RULE: keep changes small.\n");
+    let agent = workspace.base.join("careful-reviewer.md");
+    let text =
+        "---\nname: careful-reviewer\ntools: Read\n---\nREVIEWER-RULE: read every changed line.\n";
+    std::fs::write(&agent, text).unwrap();
+    let provider = ScriptedGateway::start(wire, |request| {
+        Reply::Stream(vec![content(&format!("REPLY-{}", request.number))])
+    });
+    workspace.configure(wire.name(), "test-model", Some("low"));
+    let agent_arg = agent.display().to_string();
+    let mut tui = launch_tui_with(
+        microgentic(),
+        &workspace,
+        &provider,
+        30,
+        160,
+        &["--agent", &agent_arg],
+    );
+    tui.wait_for("the agent in the status bar", |screen| {
+        screen
+            .row(28)
+            .contains("📁 project  🎭 careful-reviewer  📜 1")
+    });
+    tui.submit("/agent");
+    let screen = tui.wait_text("Working as careful-reviewer");
+    assert!(
+        screen.contains(&format!("{agent_arg}  {} B  about 10 tokens", text.len())),
+        "{screen}"
+    );
+    assert!(screen.contains("Ignored frontmatter: tools"), "{screen}");
+    tui.submit("Hello.");
+    tui.wait_for("the reply to settle", |screen| {
+        screen.contains("REPLY-1") && screen.contains(READY)
+    });
+    let requests = provider.requests();
+    assert_eq!(requests.len(), 1);
+    let system = system_message(&requests[0]);
+    let section = system
+        .find("\n# Working as: careful-reviewer\n")
+        .expect(&system);
+    let guidance = system.find("\n# Project guidance\n").expect(&system);
+    assert!(section < guidance, "{system}");
+    assert!(system.contains("\n\nREVIEWER-RULE: read every changed line.\n"));
+    let trace = workspace.traces().pop().expect("a trace");
+    let loaded = trace_payloads(&trace, "context.agent.loaded");
+    assert_eq!(loaded.len(), 1);
+    assert_eq!(loaded[0]["path"], agent_arg.as_str());
+    assert_eq!(loaded[0]["delivery"], "full_section");
+    assert_eq!(
+        loaded[0]["ignored_frontmatter_keys"],
+        serde_json::json!(["tools"])
+    );
+    tui.quit();
+}
+
+#[test]
+fn tui_works_as_an_agent_file_omlx() {
+    agent_file(Wire::Omlx);
+}
+
+#[test]
+fn tui_works_as_an_agent_file_ollama() {
+    agent_file(Wire::Ollama);
 }
 
 #[test]

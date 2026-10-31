@@ -453,3 +453,78 @@ fn an_agent_file_over_its_budget_stops_before_any_request() {
     assert_eq!(provider.request_count(), 0);
     assert!(workspace.traces().is_empty());
 }
+
+#[test]
+fn the_conversation_flag_is_top_level_only() {
+    let help = |path: &[&str]| {
+        let mut command = super::command_definition();
+        let mut current = &mut command;
+        for name in path {
+            current = current.find_subcommand_mut(name).unwrap();
+        }
+        current.render_long_help().to_string()
+    };
+    assert!(help(&[]).contains("--agent <NAME|PATH>"), "{}", help(&[]));
+    for path in [
+        &["setup"][..],
+        &["benchmark"],
+        &["benchmark", "run"],
+        &["benchmark", "run-sequential"],
+        &["analyze-trace"],
+    ] {
+        assert!(!help(path).contains("--agent"), "{path:?}: {}", help(path));
+    }
+    // Before a command, --agent is refused rather than silently dropped.
+    let workspace = Workspace::new();
+    install_reviewer(&workspace);
+    let provider = ScriptedGateway::replying(Wire::Omlx, vec![content("Hi.")]);
+    let error = execute_input_result(
+        microgentic(),
+        &["--agent", "careful-reviewer", "run", "--prompt", "Hi."],
+        &provider,
+        &workspace,
+        b"",
+    )
+    .err()
+    .expect("the run is refused");
+    assert_eq!(
+        format!("{error:#}"),
+        "usage error: --agent before a command applies only to the conversation; give it after the command, as in microgentic run --agent <name|path>"
+    );
+    assert_eq!(provider.request_count(), 0);
+}
+
+#[test]
+fn the_conversation_reports_a_bad_agent_before_it_opens() {
+    let workspace = Workspace::new();
+    install_reviewer(&workspace);
+    let missing = workspace.base.join("missing.md").display().to_string();
+    let matches = super::command_definition()
+        .try_get_matches_from([
+            "microgentic",
+            "--config",
+            workspace.config.to_str().unwrap(),
+            "--agent",
+            &missing,
+        ])
+        .unwrap();
+    let cli = <super::Cli as clap::FromArgMatches>::from_arg_matches(&matches).unwrap();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    // The agent file is read before the terminal check, so this error, not
+    // "interactive mode needs a terminal", reaches the user.
+    let error = runtime
+        .block_on(super::dispatch_cli(
+            cli,
+            false,
+            &mut Vec::new(),
+            &mut Vec::new(),
+        ))
+        .unwrap_err();
+    assert_eq!(
+        format!("{error:#}"),
+        format!("usage error: agent file {missing} does not exist")
+    );
+}

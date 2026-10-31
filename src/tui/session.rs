@@ -38,6 +38,9 @@ pub(super) struct Session {
     /// The project guidance the next message will carry, refreshed like git.
     pub(super) guidance: Discovery,
     guidance_refresh: Option<JoinHandle<Discovery>>,
+    /// The agent file given with `--agent`, read at start and again by
+    /// `/agent`. Each worker reads it from its path.
+    pub(super) agent: Option<crate::agent_file::AgentFile>,
 }
 
 impl Session {
@@ -52,6 +55,7 @@ impl Session {
             config_path: None,
             guidance: Discovery::default(),
             guidance_refresh: None,
+            agent: None,
         }
     }
 
@@ -139,6 +143,18 @@ pub(super) fn run_command(view: &mut View, session: &mut Session, command: Comma
             session.guidance = discover_guidance(&root, user_file.as_deref(), budget);
             guidance_report(&session.guidance, &view.guidance_shown)
         }
+        Command::Agent => match &session.agent {
+            None => NO_AGENT.into(),
+            // Asked for directly, so read the file now, as the next worker will.
+            Some(agent) => match crate::agent_file::load(&agent.path) {
+                Ok(current) => {
+                    let report = agent_report(&current);
+                    session.agent = Some(current);
+                    report
+                }
+                Err(error) => format!("{error:#}. The next message will fail until it is fixed.\n"),
+            },
+        },
         Command::Context => {
             view.context_panel.toggle();
             if view.context_panel.visible {
@@ -259,6 +275,29 @@ fn guidance_report(discovery: &Discovery, shown: &std::collections::BTreeSet<Str
             size(file.bytes)
         ));
     }
+    text
+}
+
+const NO_AGENT: &str =
+    "No agent file. Start the conversation with microgentic --agent <name|path> to work as one.\n";
+
+/// The agent file the conversation works as: name, path, size and what is
+/// ignored.
+fn agent_report(agent: &crate::agent_file::AgentFile) -> String {
+    let mut text = format!(
+        "Working as {}\n  {}  {}  about {} tokens\n",
+        agent.name,
+        agent.path.display(),
+        size(agent.bytes),
+        agent.estimated_tokens()
+    );
+    if !agent.ignored_keys.is_empty() {
+        text.push_str(&format!(
+            "  Ignored frontmatter: {}\n",
+            agent.ignored_keys.join(", ")
+        ));
+    }
+    text.push_str("Each message carries it before project guidance. It is information: it does not change tools, validation, the model or stop rules.\n");
     text
 }
 
@@ -446,6 +485,47 @@ mod tests {
             guidance_report(&Discovery::default(), &shown)
                 .starts_with("No project guidance found.")
         );
+    }
+
+    #[test]
+    fn the_agent_command_rereads_the_file_and_reports_it() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("careful-reviewer.md");
+        std::fs::write(
+            &path,
+            "---\nname: careful\ntools: Read\n---\nRead closely.\n",
+        )
+        .unwrap();
+        let mut view = view();
+        let mut session = session();
+        run_command(&mut view, &mut session, Command::Agent);
+        assert!(history_text(&view).ends_with(NO_AGENT));
+
+        session.agent = Some(crate::agent_file::load(&path).unwrap());
+        // The file changed after the conversation opened; /agent shows it now.
+        let text =
+            "---\nname: very-careful\ntools: Read\nmodel: opus\n---\nRead every line closely.\n";
+        std::fs::write(&path, text).unwrap();
+        run_command(&mut view, &mut session, Command::Agent);
+        assert!(
+            history_text(&view).ends_with(&format!(
+                "Working as very-careful\n  {}  {} B  about 6 tokens\n  Ignored frontmatter: tools, model\nEach message carries it before project guidance. It is information: it does not change tools, validation, the model or stop rules.\n",
+                path.display(),
+                text.len()
+            )),
+            "{}",
+            history_text(&view)
+        );
+        assert_eq!(session.agent.as_ref().unwrap().name, "very-careful");
+
+        std::fs::remove_file(&path).unwrap();
+        run_command(&mut view, &mut session, Command::Agent);
+        assert!(
+            history_text(&view).contains(&format!("reading agent file {}", path.display())),
+            "{}",
+            history_text(&view)
+        );
+        assert!(history_text(&view).ends_with("The next message will fail until it is fixed.\n"));
     }
 
     #[test]

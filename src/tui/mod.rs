@@ -265,6 +265,7 @@ fn bar_state<'a>(view: &View, session: &'a Session) -> BarState<'a> {
             .and_then(|name| name.to_str())
             .unwrap_or("/"),
         git: session.git.as_ref(),
+        agent: session.agent.as_ref().map(|agent| agent.name.as_str()),
         standing: view.standing.unwrap_or_else(|| session.guidance_count()),
         context: view.context.or(window.map(|window| ContextUsage {
             used_tokens: 0,
@@ -339,6 +340,10 @@ fn start_reply(view: &mut View, session: &mut Session, prompt: &str) -> Result<O
         .stderr(Stdio::piped());
     if let Some(effort) = &settings.reasoning_effort {
         command.args(["--reasoning-effort", effort]);
+    }
+    // The worker reads the same agent file, by the path resolved at start.
+    if let Some(agent) = &session.agent {
+        command.arg("--agent").arg(&agent.path);
     }
     let mut child = match command.spawn() {
         Ok(child) => child,
@@ -495,13 +500,25 @@ fn draw(
     Ok(())
 }
 
-pub async fn run(config: Option<PathBuf>) -> Result<()> {
+pub async fn run(
+    config: Option<PathBuf>,
+    agent: Option<crate::agent_file::AgentFile>,
+) -> Result<()> {
     let path = crate::preferences::config_path(config.as_deref())?;
     let mut session = Session::new(
         std::env::current_dir()?,
         crate::preferences::load(&path)?.unwrap_or_default(),
     );
     session.config_path = Some(path.clone());
+    // A file too large for the model's known window is refused before the
+    // conversation opens; each worker checks again against the window the
+    // provider reports.
+    if let Some(agent) = &agent {
+        agent.check_budget(crate::cli::model_context_window_tokens(
+            &session.settings.model,
+        ))?;
+    }
+    session.agent = agent;
     session.refresh_git();
     session.refresh_guidance();
     let palette = Palette::from_no_color(std::env::var_os("NO_COLOR").as_deref());
@@ -639,6 +656,7 @@ pub async fn run(config: Option<PathBuf>) -> Result<()> {
                     session.settings.reasoning_effort.clone(),
                     session.git.clone(),
                     session.guidance_count(),
+                    session.agent.as_ref().map(|agent| agent.name.clone()),
                     view.context,
                 ),
                 view.history.revision,
