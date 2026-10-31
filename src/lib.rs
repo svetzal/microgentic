@@ -2,6 +2,7 @@ pub mod acceptance_interactions;
 pub mod acceptance_ledger;
 pub mod acceptance_plan;
 pub mod agent;
+pub mod agent_file;
 pub mod baseline;
 pub mod calculator;
 pub mod cli;
