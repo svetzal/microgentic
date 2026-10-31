@@ -59,6 +59,28 @@ once with the same status.
 runs keep the task instructions, the DONE/FAIL ending, and declared probes.
 See [Benchmark mode](benchmark.md).
 
+## Engineering work in a separate task
+
+`run` gives the model a `start_task` tool for engineering work that changes the
+project. The model writes a brief: the goal, the context from your prompt that
+the work needs, any constraints, and the shell commands that must pass when the
+work is done. The task starts at once.
+
+The task is done by an engineering agent that works like a benchmark task run.
+It gets the brief as plain text and the commands as probes, and it does not see
+your prompt. It ends with DONE or FAIL. When the brief has checks, the work is
+accepted only after those probes pass. Its outcome, summary, changed files, and
+check results go back to the model, which tells you the result in its reply.
+
+`run` shows nothing more while the task runs, and the report lines at the end
+are unchanged: what the task changed is what the run changed. The brief is in
+the run's trace, in a `subagent.task.started` event, with the location of the
+task's contract. The task writes its own trace, and a `subagent.task.finished`
+event gives its location and outcome. Both stay in the run-state directory,
+not in your project. See [Traces and transcripts](traces.md).
+
+The conversation view does not offer `start_task` yet.
+
 ## Get the result
 
 The reply goes to stdout, without blank lines before or after it. The streamed

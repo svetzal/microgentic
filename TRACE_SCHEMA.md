@@ -149,6 +149,32 @@ error, `outcome` is `null`. Readers classify from `outcome` and use `error`
 only as diagnosis. Traces written before outcomes existed have no `outcome`
 field.
 
+## Engineering subagent tasks
+
+Everyday `run` offers the coordinator a `start_task` tool. A call runs the
+engineering subagent: the task-mode loop that benchmark runs use, with an
+explicit run contract written from the brief. The coordinator trace records
+two events around it; the subagent writes its own trace.
+
+`subagent.task.started` holds `task` (1 for the run's first task, then 2, and
+so on), the brief fields `goal`, `context`, `constraints` and `checks` as the
+model gave them (trimmed; empty text when absent; duplicate checks removed),
+`guidance` (the plain text rendered from them, which is the contract
+guidance), `contract_file`, and `trace_dir`, the directory that holds the
+subagent's trace. Both paths are below `<experiment_dir>/task-<n>/`, never in
+the project.
+
+`subagent.task.finished` holds `task`, the subagent's `outcome` (the same
+object as a run summary's `outcome`; for a subagent run that ended in an error,
+the outcome it carries, or `{"kind": "error", "message": …}`), and
+`trace_file`, the subagent's trace. `trace_file` is `null` only when a failed
+subagent left no single trace file.
+
+The subagent shares the coordinator's gateway and cancellation, so recovery
+lifecycle events for its requests go to its own trace while it runs. A brief
+that fails validation (no goal, an empty check, a check that masks failure)
+is a tool error and records neither event.
+
 ## Context window and residency
 
 Everyday `run` and the conversation record these; benchmark runs do not, so

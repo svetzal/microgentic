@@ -79,6 +79,14 @@ pub const INITIAL_CONTEXT_POLICY_EVALUATED: &str = "initial_context.policy.evalu
 pub const INITIAL_CONTEXT_POLICY_FAILED: &str = "initial_context.policy.failed";
 /// The authoritative worker initial-context packet was assembled.
 pub const INITIAL_CONTEXT_ASSEMBLED: &str = "initial_context.assembled";
+/// The conversation handed engineering work to the subagent with
+/// `start_task`. Payload: task number, the brief fields (goal, context,
+/// constraints, checks), the rendered guidance, the contract file, and the
+/// directory that holds the subagent's trace.
+pub const SUBAGENT_TASK_STARTED: &str = "subagent.task.started";
+/// The subagent's run ended. Payload: task number, outcome, and the
+/// subagent's trace file (null when it left none).
+pub const SUBAGENT_TASK_FINISHED: &str = "subagent.task.finished";
 
 // Legacy Slice-13 vocabulary remains readable by the trace adapter.
 /// An isolated semantic context-selection call was configured and started.

@@ -536,12 +536,18 @@ gateway still needs recovery, reasoning, telemetry, and tool-history conformance
     continuity with historical runs; record a new continuity baseline. The
     original Rust guidance and the recognition tables that still carry
     language knowledge are recorded in `LANGUAGE-CUSTOMIZATION.md`.
-  - [ ] Add `start_task` to the conversation. Structured fields help the user
-    think the work through, and the user reviews the brief. The coordinator
-    writes a run contract: goal and relevant context become guidance, success
-    checks become probes, and any agreed limits become scopes. The subagent's
-    outcome, changes, and checks return as the tool result. Link the subagent
-    trace from the coordinator trace.
+  - Add `start_task` to the conversation. Structured fields help the user
+    think the work through. The coordinator writes a run contract: goal and
+    relevant context become guidance, success checks become probes, and any
+    agreed limits become scopes. The subagent's outcome, changes, and checks
+    return as the tool result. Link the subagent trace from the coordinator
+    trace.
+    - [x] 2a: non-interactive `run`. The task starts immediately, and the
+      brief is recorded in the trace (`subagent.task.started`). The TUI does
+      not offer the tool yet. Scopes are not written; the brief has no field
+      for agreed limits beyond plain-text constraints.
+    - [ ] 2b: TUI. The coordinator proposes the brief; the user starts it, or
+      replies and the coordinator revises it.
   - [ ] Remove the blended loop. The coordinator keeps inspection tools and
     loses write tools, so all write gates belong to the subagent. Reduce the
     `conversational`, `calculator`, and `project_guidance` flags to coordinator

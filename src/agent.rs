@@ -159,6 +159,10 @@ pub struct AgentRunConfig {
     pub project_guidance: bool,
     /// The user-level guidance file beside `config.json`, when discovery is on.
     pub user_guidance_file: Option<PathBuf>,
+    /// Offer `start_task`, which hands engineering work to the task-mode
+    /// subagent. Everyday `run` starts the task at once; every other mode,
+    /// and the subagent itself, leaves it off.
+    pub start_task: crate::start_task::StartTaskMode,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -347,6 +351,7 @@ async fn run_agent_entry(
 ) -> Result<AgentRunSummary> {
     #[cfg(test)]
     if let Ok(io) = crate::outcome_test_io::ACTIVE.try_with(Arc::clone) {
+        let shared: Arc<dyn LlmGateway> = io.clone();
         return run_agent_with_gateway_inner(
             config,
             io.as_ref(),
@@ -354,6 +359,7 @@ async fn run_agent_entry(
             None,
             conversation,
             CancellationToken::new(),
+            Some(shared),
         )
         .await;
     }
@@ -439,6 +445,9 @@ async fn run_agent_entry(
         unix
     ))]
     let gateway = crate::tui_test_provider::gateway(cancellation.clone()).unwrap_or(gateway);
+    // Shared with any subagent this run starts, so it reaches the same
+    // provider through the same recovery and cancellation.
+    let gateway: Arc<dyn LlmGateway> = Arc::from(gateway);
     let result = run_agent_with_gateway_inner(
         config,
         gateway.as_ref(),
@@ -446,6 +455,7 @@ async fn run_agent_entry(
         Some(evidence.clone()),
         conversation,
         cancellation,
+        Some(gateway.clone()),
     )
     .await;
     let settled = evidence.settle().await;
@@ -506,10 +516,35 @@ async fn run_agent_with_gateway<G: LlmGateway + ?Sized>(
         None,
         None,
         CancellationToken::new(),
+        None,
     )
     .await
 }
 
+/// Run the engineering subagent `start_task` starts: the task-mode loop,
+/// nested in the coordinator's run on its gateway, recovery evidence and
+/// cancellation. It installs no signal handler of its own and never moves
+/// the process working directory.
+pub(crate) fn run_subagent<'a>(
+    config: AgentRunConfig,
+    gateway: &'a dyn LlmGateway,
+    tool_root: PathBuf,
+    recovery_evidence: Option<Arc<crate::recovery::Evidence>>,
+    cancellation: CancellationToken,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<AgentRunSummary>> + Send + 'a>> {
+    Box::pin(run_agent_with_gateway_inner(
+        config,
+        gateway,
+        tool_root,
+        recovery_evidence,
+        None,
+        cancellation,
+        None,
+    ))
+}
+
+/// `shared_gateway` is the same gateway as `gateway`, as a handle a
+/// `start_task` subagent can keep; runs without one cannot offer it.
 async fn run_agent_with_gateway_inner<G: LlmGateway + ?Sized>(
     config: AgentRunConfig,
     gateway: &G,
@@ -517,6 +552,7 @@ async fn run_agent_with_gateway_inner<G: LlmGateway + ?Sized>(
     recovery_evidence: Option<Arc<crate::recovery::Evidence>>,
     conversation: Option<Arc<crate::conversation::ConversationRun>>,
     cancellation: CancellationToken,
+    shared_gateway: Option<Arc<dyn LlmGateway>>,
 ) -> Result<AgentRunSummary> {
     let mut completion_config = agent_completion_config(
         config.max_model_interactions,
@@ -625,7 +661,7 @@ async fn run_agent_with_gateway_inner<G: LlmGateway + ?Sized>(
             });
         }
     }
-    if let Some(evidence) = recovery_evidence {
+    if let Some(evidence) = &recovery_evidence {
         evidence.bind(trace.clone());
     }
     let stash_baseline = crate::stash::capture(&tool_root).await;
@@ -880,6 +916,27 @@ async fn run_agent_with_gateway_inner<G: LlmGateway + ?Sized>(
         system_prompt.push('\n');
         system_prompt.push_str(crate::calculator::GUIDANCE);
         tools.push(Box::new(crate::calculator::CalculateTool));
+    }
+    if config.start_task == crate::start_task::StartTaskMode::Immediate {
+        let gateway = shared_gateway
+            .clone()
+            .context("start_task needs a gateway the subagent can share")?;
+        // Like the calculator, the guidance travels with the tool.
+        system_prompt.push('\n');
+        system_prompt.push_str(crate::start_task::GUIDANCE);
+        tools.push(Box::new(crate::start_task::StartTaskTool::new(
+            crate::start_task::Subagent {
+                coordinator: config.clone(),
+                context_window: context_window.clone(),
+                gateway,
+                tool_root: tool_root.clone(),
+                evidence: recovery_evidence.clone(),
+                cancellation: cancellation.clone(),
+                trace: Arc::clone(&trace),
+                state_dir: experiment_dir.clone(),
+                started: Default::default(),
+            },
+        )));
     }
     // Project guidance is text in the system context. It is read after the
     // tool set is fixed and never changes tools, permissions or stop policy.
@@ -9585,6 +9642,7 @@ mod tests {
             calculator: false,
             project_guidance: false,
             user_guidance_file: None,
+            start_task: crate::start_task::StartTaskMode::Off,
         };
         let error = anyhow::anyhow!("HTTP error: unexpected EOF during chunk size line");
 
@@ -11340,6 +11398,7 @@ mod tests {
                     calculator: false,
                     project_guidance: false,
                     user_guidance_file: None,
+                    start_task: crate::start_task::StartTaskMode::Off,
                 },
                 gateway,
                 self.workspace.clone(),
@@ -11388,6 +11447,7 @@ mod tests {
                     calculator: false,
                     project_guidance: false,
                     user_guidance_file: None,
+                    start_task: crate::start_task::StartTaskMode::Off,
                 },
                 gateway,
                 self.workspace.clone(),
@@ -11442,6 +11502,7 @@ mod tests {
                 calculator: false,
                 project_guidance: false,
                 user_guidance_file: None,
+                start_task: crate::start_task::StartTaskMode::Off,
             }
         }
 
@@ -11520,6 +11581,7 @@ mod tests {
                     calculator: false,
                     project_guidance: false,
                     user_guidance_file: None,
+                    start_task: crate::start_task::StartTaskMode::Off,
                 },
                 gateway,
                 self.workspace.clone(),
@@ -11567,6 +11629,7 @@ mod tests {
                     calculator: false,
                     project_guidance: false,
                     user_guidance_file: None,
+                    start_task: crate::start_task::StartTaskMode::Off,
                 },
                 gateway,
                 self.workspace.clone(),
@@ -11614,6 +11677,7 @@ mod tests {
                     calculator: false,
                     project_guidance: false,
                     user_guidance_file: None,
+                    start_task: crate::start_task::StartTaskMode::Off,
                 },
                 gateway,
                 self.workspace.clone(),
@@ -11657,6 +11721,7 @@ mod tests {
                     calculator: false,
                     project_guidance: false,
                     user_guidance_file: None,
+                    start_task: crate::start_task::StartTaskMode::Off,
                 },
                 gateway,
                 self.workspace.clone(),

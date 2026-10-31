@@ -45,6 +45,7 @@ fn everyday_request(wire: Wire, prompt: &str) -> Value {
         "Ignore generated build, dependency, cache, and virtual-environment directories unless the request requires them.",
         "Answer naturally with useful results, explanations, or concrete blockers. A visible conversational reply ends the exchange; DONE and FAIL tokens are not required.",
         "For arithmetic with more than one trivial step, including sums, ratios, percentages and unit conversions, call calculate instead of working it out in your head, and use its results.",
+        "Engineering work that changes the project goes through start_task. Give it a clear goal, the relevant context from this conversation, any constraints, and the commands that show the work is done. Then report the result to the user.",
     ].join("\n");
     let mut request = expected_request(
         wire,
@@ -70,6 +71,23 @@ fn everyday_request(wire: Wire, prompt: &str) -> Value {
                 "type":"object",
                 "properties":{"expression":{"type":"string", "description":r#"One or more arithmetic expressions, separated by newlines or ";"."#}},
                 "required":["expression"]
+            }
+        }
+    }));
+    request["tools"].as_array_mut().unwrap().push(json!({
+        "type":"function",
+        "function":{
+            "name":"start_task",
+            "description":"Hand engineering work that changes the project to an engineering agent. It does the work now and reports back. It sees only what you write here, not this conversation, so include what it needs to know. Returns the outcome, its summary, the files it changed and the results of the checks.",
+            "parameters":{
+                "type":"object",
+                "properties":{
+                    "goal":{"type":"string", "description":"The work to do, in a sentence or two."},
+                    "context":{"type":"string", "description":"What the agent needs from this conversation: findings, decisions, relevant files."},
+                    "constraints":{"type":"string", "description":"Limits to respect, such as files to leave alone or approaches to avoid."},
+                    "checks":{"type":"array", "items":{"type":"string"}, "description":"Shell commands that must pass for the work to count as done, such as \"make test\", \"pytest\" or \"cargo test\"."}
+                },
+                "required":["goal"]
             }
         }
     }));

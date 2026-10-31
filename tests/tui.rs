@@ -579,15 +579,29 @@ fn conversation(binary: &str, wire: Wire) {
     for control in controls {
         assert_eq!(requests[0][control], requests[5][control], "{control}");
     }
-    let mut conversation_tools = requests[0]["tools"].as_array().unwrap().clone();
+    let conversation_tools = requests[0]["tools"].as_array().unwrap().clone();
+    let mut run_tools = requests[5]["tools"].as_array().unwrap().clone();
+    let start_task = run_tools
+        .iter()
+        .position(|tool| tool["function"]["name"] == "start_task");
     if binary == legacy_binary() {
         // The compatibility executable's run keeps its historical tool set;
         // only everyday runs and conversations add calculate.
-        conversation_tools.retain(|tool| tool["function"]["name"] != "calculate");
+        assert_eq!(start_task, None);
+        let mut expected = conversation_tools.clone();
+        expected.retain(|tool| tool["function"]["name"] != "calculate");
+        assert_eq!(expected, run_tools);
+    } else {
+        // Everyday `run` also starts engineering tasks; the conversation does
+        // not offer start_task until the user can approve the brief.
+        assert_eq!(start_task, Some(run_tools.len() - 1));
+        run_tools.pop();
+        assert_eq!(conversation_tools, run_tools);
     }
-    assert_eq!(
-        serde_json::Value::Array(conversation_tools),
-        requests[5]["tools"]
+    assert!(
+        !conversation_tools
+            .iter()
+            .any(|tool| tool["function"]["name"] == "start_task")
     );
 
     // Opening a second TUI starts a new conversation and never resumes.
