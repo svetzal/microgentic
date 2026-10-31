@@ -1,1 +1,1 @@
-If you edit, run the validation ladder immediately afterward: cargo fmt --check, cargo clippy, focused tests, then broad tests.
+If you edit, run the validation ladder immediately afterward: format check, lint, focused tests, then broad tests.

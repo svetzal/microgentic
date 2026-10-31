@@ -679,7 +679,8 @@ fn legacy_prompt_keeps_the_task_path(wire: Wire) {
     let requests = provider.requests();
     assert_eq!(requests.len(), 2, "one request per allowed iteration");
     assert!(
-        user_messages(&requests[0])[0].starts_with("Complete this benchmark task"),
+        user_messages(&requests[0])[0]
+            .starts_with("Complete this task inside the project workspace"),
         "{:?}",
         user_messages(&requests[0])
     );

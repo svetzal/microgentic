@@ -101,7 +101,7 @@ pub(crate) fn profile_ref() -> ProfileRef {
 }
 
 // ---------------------------------------------------------------------
-// Prompt text. Moved verbatim from `agent.rs`.
+// Prompt text. Moved from `agent.rs`; task-mode wording is language-neutral.
 // ---------------------------------------------------------------------
 
 /// Moved from `agent.rs::system_prompt`.
@@ -111,15 +111,15 @@ pub(crate) fn system_prompt() -> String {
         "Use the provided tools to read files, write files, apply unified diffs, and run shell commands.",
         "Use list_tree to map available files before guessing repository contents.",
         "Use read_file line ranges and byte limits to keep context small.",
-        "All tool paths are relative to the generated project root.",
-        "Shell commands run from the generated project root by default.",
+        "All tool paths are relative to the project root.",
+        "Shell commands run from the project root by default.",
         "Work in small steps. Verify with deterministic shell commands before claiming completion.",
-        "Create Cargo.toml, src/lib.rs, and other generated source at the tool root unless the task says otherwise.",
+        "Create project files and source at the tool root unless the task says otherwise.",
         "Ensure a project-appropriate .gitignore exists unless the task explicitly forbids it. If one already exists, leave it unchanged unless the task requires an update.",
         "Ignore generated build, dependency, cache, and virtual-environment directories such as target/, build/, dist/, node_modules/, .venv/, and __pycache__/. Do not list or inspect ignored paths unless explicitly needed.",
-        "Use timeout_secs 1800 for first cargo build, cargo test, or similarly expensive validation probes.",
+        "Use timeout_secs 1800 for a first build, a first full test run, or similarly expensive validation probes.",
         "After a validation failure, repair narrowly: cite the failing command and failure text, inspect only relevant code, prefer edit_file for focused existing-source repairs, then rerun validation.",
-        "For Rust projects after edits, prefer this validation ladder: cargo fmt --check, cargo clippy --all-targets --all-features -- -D warnings, focused tests, then cargo test.",
+        "After edits, prefer this validation ladder using the project's own tools: format check, lint, focused tests, then the full test suite.",
         "Use edit_file for existing source edits. Use write_file for new files, or for existing source only after reading the complete current file and preserving unrelated content.",
         "Never end a turn with an empty response. Continue using tools, or reply DONE/FAIL as instructed.",
         "When you have completed the task and verified it, answer exactly DONE.",
@@ -131,12 +131,12 @@ pub(crate) fn system_prompt() -> String {
 /// Moved from `agent.rs::run_prompt`.
 pub(crate) fn run_prompt(goal: &str) -> String {
     format!(
-        "Complete this benchmark task inside the generated project workspace.\n\n{goal}\n\n\
+        "Complete this task inside the project workspace.\n\n{goal}\n\n\
          Required harness behavior:\n\
-         - You are already operating inside the generated project's workspace directory.\n\
+         - You are already operating inside the project's workspace directory.\n\
          - Inspect the project root first.\n\
          - Ensure a project-appropriate .gitignore exists unless this task explicitly forbids it. If one already exists, leave it unchanged unless the task requires an update.\n\
-         - Build or update the Rust project at the current tool root, not in a nested workspace/ directory.\n\
+         - Build or update the project at the current tool root, not in a nested workspace/ directory.\n\
          - Run at least one deterministic validation command.\n\
          - Leave generated project files at the tool root and use DONE only after validation."
     )
@@ -164,7 +164,7 @@ pub(crate) fn post_write_validation_nudge(had_final_text: bool) -> &'static str 
 }
 
 /// Moved from `agent.rs::validation_repair_prompt`'s trailing clause.
-pub(crate) const REPAIR_LADDER_SUFFIX: &str = "If you edit, run the validation ladder immediately afterward: cargo fmt --check, cargo clippy, focused tests, then broad tests.";
+pub(crate) const REPAIR_LADDER_SUFFIX: &str = "If you edit, run the validation ladder immediately afterward: format check, lint, focused tests, then broad tests.";
 
 /// Moved from `agent.rs::action_intent_signal`'s action-word list: the one
 /// coding-specific phrase ("run cargo") layered on top of the
