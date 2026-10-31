@@ -131,7 +131,7 @@ No cross-repository boundary changed. The consumer fixtures are not a
 provider-verified Mojentic contract set. Mojentic provider verification is
 outside this repository and is not claimed. Retained executable contracts are
 `microgentic_benchmark_continuity.v1`, SHA-256
-`510915b0d21f86f7263ff5c29399f6a0fd358fb00ac72af2ce5771df96eb31af`,
+`6d106ed8ca6393de4d2186aba9904370a18253cc445f3d8df6111b314c1ec241`,
 and `microgentic_terminal_outcome_contract.v1`, SHA-256
 `6c8afe8fe658944da93d4b8f582d74e20a16d8ef59b1dfa3f128592df1183f37`.
 The first runs in the Rust gate; the second is verified by its Rust producer
@@ -244,7 +244,7 @@ Characterization of every case remaining before this migration:
 The already landed `cli::capped_reasoning` coverage below remains unchanged.
 Expected messages and tool descriptors reuse
 `tests/fixtures/benchmark_continuity.json` (`microgentic_benchmark_continuity.v1`,
-SHA-256 `510915b0d21f86f7263ff5c29399f6a0fd358fb00ac72af2ce5771df96eb31af`).
+SHA-256 `6d106ed8ca6393de4d2186aba9904370a18253cc445f3d8df6111b314c1ec241`).
 Additional expected IDs, empty-tree and shell results, continuation/repair text,
 controls and optional native reasoning fields are literal test inputs. Everyday
 system guidance and the additional calculate descriptor are literal specifications
@@ -466,7 +466,10 @@ The original cases and ignored comparison were characterized before migration:
 
 Fixed expectations live in `tests/fixtures/benchmark_continuity.json`, version
 `microgentic_benchmark_continuity.v1`, SHA-256
-`510915b0d21f86f7263ff5c29399f6a0fd358fb00ac72af2ce5771df96eb31af`.
+`6d106ed8ca6393de4d2186aba9904370a18253cc445f3d8df6111b314c1ec241`.
+The baseline was re-recorded when the task-mode system and run prompts and the
+repair-ladder suffix became language-neutral (they no longer name Rust or
+Cargo); earlier benchmark requests are not byte-identical to this version.
 Shared descriptors and completion controls
 are stored once and expanded into complete requests; contract and goal messages
 are literal, provider model names and packet controls are explicit. No value is

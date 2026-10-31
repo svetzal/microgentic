@@ -249,7 +249,7 @@ fn dialogue(wire: Wire) {
     assert!(
         !requests[0]["messages"]
             .to_string()
-            .contains("Complete this benchmark task")
+            .contains("Complete this task inside the project workspace")
     );
     assert!(session.session_state()["last_error"].is_null());
 

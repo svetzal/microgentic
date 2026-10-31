@@ -10,6 +10,20 @@ The release workflow publishes each version's section as its GitHub release note
 
 ## [Unreleased]
 
+### Changed
+
+- Task-mode prompts (benchmark runs and `run --goal`/`run --contract`) no
+  longer assume a Rust project built with Cargo. The system prompt and the
+  first task message now speak of the project root, project files, a first
+  build or full test run, and a validation ladder run with the project's own
+  tools: format check, lint, focused tests, then the full test suite.
+- Validation-repair prompts in every mode, including everyday `run` and the
+  TUI, now name that general ladder instead of `cargo fmt --check` and
+  `cargo clippy`.
+- Benchmark provider requests change as a result. Earlier benchmark baselines
+  are not request-identical to this version; the continuity fixture was
+  re-recorded.
+
 ## [0.6.0] - 2026-10-18
 
 Microgentic now builds on the published Mojentic 3.0.1 crate and lets it do

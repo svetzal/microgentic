@@ -531,9 +531,11 @@ gateway still needs recovery, reasoning, telemetry, and tool-history conformance
   gates switch on when the model writes, and benchmark task mode is a separate
   loop with its own prompts, stop rule, tools, and context accounting. Slices,
   each landing on its own:
-  - [ ] Make the task loop general. Remove the Rust-specific and "benchmark
+  - [x] Make the task loop general. Remove the Rust-specific and "benchmark
     task" wording from the task prompts. This deliberately breaks request
-    continuity with historical runs; record a new continuity baseline.
+    continuity with historical runs; record a new continuity baseline. The
+    original Rust guidance and the recognition tables that still carry
+    language knowledge are recorded in `LANGUAGE-CUSTOMIZATION.md`.
   - [ ] Add `start_task` to the conversation. Structured fields help the user
     think the work through, and the user reviews the brief. The coordinator
     writes a run contract: goal and relevant context become guidance, success

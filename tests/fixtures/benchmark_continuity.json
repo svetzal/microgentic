@@ -252,21 +252,21 @@
     "goal": [
       [
         {
-          "content": "You are an adaptive coding harness instance built on Mojentic.\nUse the provided tools to read files, write files, apply unified diffs, and run shell commands.\nUse list_tree to map available files before guessing repository contents.\nUse read_file line ranges and byte limits to keep context small.\nAll tool paths are relative to the generated project root.\nShell commands run from the generated project root by default.\nWork in small steps. Verify with deterministic shell commands before claiming completion.\nCreate Cargo.toml, src/lib.rs, and other generated source at the tool root unless the task says otherwise.\nEnsure a project-appropriate .gitignore exists unless the task explicitly forbids it. If one already exists, leave it unchanged unless the task requires an update.\nIgnore generated build, dependency, cache, and virtual-environment directories such as target/, build/, dist/, node_modules/, .venv/, and __pycache__/. Do not list or inspect ignored paths unless explicitly needed.\nUse timeout_secs 1800 for first cargo build, cargo test, or similarly expensive validation probes.\nAfter a validation failure, repair narrowly: cite the failing command and failure text, inspect only relevant code, prefer edit_file for focused existing-source repairs, then rerun validation.\nFor Rust projects after edits, prefer this validation ladder: cargo fmt --check, cargo clippy --all-targets --all-features -- -D warnings, focused tests, then cargo test.\nUse edit_file for existing source edits. Use write_file for new files, or for existing source only after reading the complete current file and preserving unrelated content.\nNever end a turn with an empty response. Continue using tools, or reply DONE/FAIL as instructed.\nWhen you have completed the task and verified it, answer exactly DONE.\nIf the task cannot be completed, answer exactly FAIL with one concise reason.",
+          "content": "You are an adaptive coding harness instance built on Mojentic.\nUse the provided tools to read files, write files, apply unified diffs, and run shell commands.\nUse list_tree to map available files before guessing repository contents.\nUse read_file line ranges and byte limits to keep context small.\nAll tool paths are relative to the project root.\nShell commands run from the project root by default.\nWork in small steps. Verify with deterministic shell commands before claiming completion.\nCreate project files and source at the tool root unless the task says otherwise.\nEnsure a project-appropriate .gitignore exists unless the task explicitly forbids it. If one already exists, leave it unchanged unless the task requires an update.\nIgnore generated build, dependency, cache, and virtual-environment directories such as target/, build/, dist/, node_modules/, .venv/, and __pycache__/. Do not list or inspect ignored paths unless explicitly needed.\nUse timeout_secs 1800 for a first build, a first full test run, or similarly expensive validation probes.\nAfter a validation failure, repair narrowly: cite the failing command and failure text, inspect only relevant code, prefer edit_file for focused existing-source repairs, then rerun validation.\nAfter edits, prefer this validation ladder using the project's own tools: format check, lint, focused tests, then the full test suite.\nUse edit_file for existing source edits. Use write_file for new files, or for existing source only after reading the complete current file and preserving unrelated content.\nNever end a turn with an empty response. Continue using tools, or reply DONE/FAIL as instructed.\nWhen you have completed the task and verified it, answer exactly DONE.\nIf the task cannot be completed, answer exactly FAIL with one concise reason.",
           "role": "system"
         },
         {
-          "content": "Complete this benchmark task inside the generated project workspace.\n\nInspect the project with list_tree, then finish. Unicode 世界.\n\nRequired harness behavior:\n- You are already operating inside the generated project's workspace directory.\n- Inspect the project root first.\n- Ensure a project-appropriate .gitignore exists unless this task explicitly forbids it. If one already exists, leave it unchanged unless the task requires an update.\n- Build or update the Rust project at the current tool root, not in a nested workspace/ directory.\n- Run at least one deterministic validation command.\n- Leave generated project files at the tool root and use DONE only after validation.",
+          "content": "Complete this task inside the project workspace.\n\nInspect the project with list_tree, then finish. Unicode 世界.\n\nRequired harness behavior:\n- You are already operating inside the project's workspace directory.\n- Inspect the project root first.\n- Ensure a project-appropriate .gitignore exists unless this task explicitly forbids it. If one already exists, leave it unchanged unless the task requires an update.\n- Build or update the project at the current tool root, not in a nested workspace/ directory.\n- Run at least one deterministic validation command.\n- Leave generated project files at the tool root and use DONE only after validation.",
           "role": "user"
         }
       ],
       [
         {
-          "content": "You are an adaptive coding harness instance built on Mojentic.\nUse the provided tools to read files, write files, apply unified diffs, and run shell commands.\nUse list_tree to map available files before guessing repository contents.\nUse read_file line ranges and byte limits to keep context small.\nAll tool paths are relative to the generated project root.\nShell commands run from the generated project root by default.\nWork in small steps. Verify with deterministic shell commands before claiming completion.\nCreate Cargo.toml, src/lib.rs, and other generated source at the tool root unless the task says otherwise.\nEnsure a project-appropriate .gitignore exists unless the task explicitly forbids it. If one already exists, leave it unchanged unless the task requires an update.\nIgnore generated build, dependency, cache, and virtual-environment directories such as target/, build/, dist/, node_modules/, .venv/, and __pycache__/. Do not list or inspect ignored paths unless explicitly needed.\nUse timeout_secs 1800 for first cargo build, cargo test, or similarly expensive validation probes.\nAfter a validation failure, repair narrowly: cite the failing command and failure text, inspect only relevant code, prefer edit_file for focused existing-source repairs, then rerun validation.\nFor Rust projects after edits, prefer this validation ladder: cargo fmt --check, cargo clippy --all-targets --all-features -- -D warnings, focused tests, then cargo test.\nUse edit_file for existing source edits. Use write_file for new files, or for existing source only after reading the complete current file and preserving unrelated content.\nNever end a turn with an empty response. Continue using tools, or reply DONE/FAIL as instructed.\nWhen you have completed the task and verified it, answer exactly DONE.\nIf the task cannot be completed, answer exactly FAIL with one concise reason.",
+          "content": "You are an adaptive coding harness instance built on Mojentic.\nUse the provided tools to read files, write files, apply unified diffs, and run shell commands.\nUse list_tree to map available files before guessing repository contents.\nUse read_file line ranges and byte limits to keep context small.\nAll tool paths are relative to the project root.\nShell commands run from the project root by default.\nWork in small steps. Verify with deterministic shell commands before claiming completion.\nCreate project files and source at the tool root unless the task says otherwise.\nEnsure a project-appropriate .gitignore exists unless the task explicitly forbids it. If one already exists, leave it unchanged unless the task requires an update.\nIgnore generated build, dependency, cache, and virtual-environment directories such as target/, build/, dist/, node_modules/, .venv/, and __pycache__/. Do not list or inspect ignored paths unless explicitly needed.\nUse timeout_secs 1800 for a first build, a first full test run, or similarly expensive validation probes.\nAfter a validation failure, repair narrowly: cite the failing command and failure text, inspect only relevant code, prefer edit_file for focused existing-source repairs, then rerun validation.\nAfter edits, prefer this validation ladder using the project's own tools: format check, lint, focused tests, then the full test suite.\nUse edit_file for existing source edits. Use write_file for new files, or for existing source only after reading the complete current file and preserving unrelated content.\nNever end a turn with an empty response. Continue using tools, or reply DONE/FAIL as instructed.\nWhen you have completed the task and verified it, answer exactly DONE.\nIf the task cannot be completed, answer exactly FAIL with one concise reason.",
           "role": "system"
         },
         {
-          "content": "Complete this benchmark task inside the generated project workspace.\n\nInspect the project with list_tree, then finish. Unicode 世界.\n\nRequired harness behavior:\n- You are already operating inside the generated project's workspace directory.\n- Inspect the project root first.\n- Ensure a project-appropriate .gitignore exists unless this task explicitly forbids it. If one already exists, leave it unchanged unless the task requires an update.\n- Build or update the Rust project at the current tool root, not in a nested workspace/ directory.\n- Run at least one deterministic validation command.\n- Leave generated project files at the tool root and use DONE only after validation.",
+          "content": "Complete this task inside the project workspace.\n\nInspect the project with list_tree, then finish. Unicode 世界.\n\nRequired harness behavior:\n- You are already operating inside the project's workspace directory.\n- Inspect the project root first.\n- Ensure a project-appropriate .gitignore exists unless this task explicitly forbids it. If one already exists, leave it unchanged unless the task requires an update.\n- Build or update the project at the current tool root, not in a nested workspace/ directory.\n- Run at least one deterministic validation command.\n- Leave generated project files at the tool root and use DONE only after validation.",
           "role": "user"
         },
         {
@@ -579,8 +579,8 @@
         "completion_temperature": 1.0,
         "components": [
           {
-            "content_chars": 1877,
-            "estimated_tokens": 470,
+            "content_chars": 1802,
+            "estimated_tokens": 451,
             "inclusion_reason": "base_system_prompt",
             "index": 0,
             "reasoning_chars": 0,
@@ -588,11 +588,11 @@
             "tool_call_chars": 0,
             "tool_call_count": 0,
             "tool_names": [],
-            "total_chars": 1877
+            "total_chars": 1802
           },
           {
-            "content_chars": 680,
-            "estimated_tokens": 170,
+            "content_chars": 645,
+            "estimated_tokens": 162,
             "inclusion_reason": "authoritative_initial_context_packet",
             "index": 1,
             "reasoning_chars": 0,
@@ -600,39 +600,39 @@
             "tool_call_chars": 0,
             "tool_call_count": 0,
             "tool_names": [],
-            "total_chars": 680
+            "total_chars": 645
           }
         ],
         "context_window_tokens": 262144,
         "delta_chars_from_previous_call": null,
-        "estimated_tokens": 1561,
+        "estimated_tokens": 1534,
         "llm_call_depth": 0,
         "max_model_interactions": 4,
-        "message_chars": 2557,
+        "message_chars": 2447,
         "message_count": 2,
         "pressure_band": "green",
         "previous_call_total_chars": null,
         "role_chars": {
-          "system": 1877,
-          "user": 680
+          "system": 1802,
+          "user": 645
         },
         "role_counts": {
           "system": 1,
           "user": 1
         },
         "tool_descriptor_chars": 3686,
-        "total_chars": 6243,
+        "total_chars": 6133,
         "transcript_policy": "summarized-transcript",
         "turn": 1,
-        "utilization": 0.005954742431640625
+        "utilization": 0.00585174560546875
       },
       {
         "assembly_policy": "append_summarized_tool_transcript",
         "completion_temperature": 1.0,
         "components": [
           {
-            "content_chars": 1877,
-            "estimated_tokens": 470,
+            "content_chars": 1802,
+            "estimated_tokens": 451,
             "inclusion_reason": "base_system_prompt",
             "index": 0,
             "reasoning_chars": 0,
@@ -640,11 +640,11 @@
             "tool_call_chars": 0,
             "tool_call_count": 0,
             "tool_names": [],
-            "total_chars": 1877
+            "total_chars": 1802
           },
           {
-            "content_chars": 680,
-            "estimated_tokens": 170,
+            "content_chars": 645,
+            "estimated_tokens": 162,
             "inclusion_reason": "authoritative_initial_context_packet",
             "index": 1,
             "reasoning_chars": 0,
@@ -652,7 +652,7 @@
             "tool_call_chars": 0,
             "tool_call_count": 0,
             "tool_names": [],
-            "total_chars": 680
+            "total_chars": 645
           },
           {
             "content_chars": 11,
@@ -685,18 +685,18 @@
         ],
         "context_window_tokens": 262144,
         "delta_chars_from_previous_call": 294,
-        "estimated_tokens": 1635,
+        "estimated_tokens": 1607,
         "llm_call_depth": 1,
         "max_model_interactions": 4,
-        "message_chars": 2851,
+        "message_chars": 2741,
         "message_count": 4,
         "pressure_band": "green",
-        "previous_call_total_chars": 6243,
+        "previous_call_total_chars": 6133,
         "role_chars": {
           "assistant": 66,
-          "system": 1877,
+          "system": 1802,
           "tool": 228,
-          "user": 680
+          "user": 645
         },
         "role_counts": {
           "assistant": 1,
@@ -705,10 +705,10 @@
           "user": 1
         },
         "tool_descriptor_chars": 3686,
-        "total_chars": 6537,
+        "total_chars": 6427,
         "transcript_policy": "summarized-transcript",
         "turn": 1,
-        "utilization": 0.006237030029296875
+        "utilization": 0.006130218505859375
       }
     ]
   },
