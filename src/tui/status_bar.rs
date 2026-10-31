@@ -149,6 +149,8 @@ pub(super) struct BarState<'a> {
     pub(super) folder: &'a str,
     pub(super) git: Option<&'a GitStatus>,
     pub(super) context: Option<ContextUsage>,
+    /// The name of the agent file the conversation works as.
+    pub(super) agent: Option<&'a str>,
     /// Standing items in the model's context: guidance files now, skills
     /// later.
     pub(super) standing: usize,
@@ -178,6 +180,13 @@ pub(super) fn status_segments(state: &BarState, width: usize) -> Vec<Styled> {
     ];
     if let Some(git) = state.git {
         segments.push((1, git_segment(git)));
+    }
+    if let Some(agent) = state.agent {
+        // Dropped after the folder, which comes first at the same priority.
+        segments.push((
+            2,
+            Styled::default().with(Role::AgentLabel, &format!("🎭 {agent}")),
+        ));
     }
     if state.standing > 0 {
         // Beside the gauge, and the first segment to drop on a narrow
@@ -354,6 +363,7 @@ mod tests {
                 used_tokens: 9_000,
                 window_tokens: Some(100_000),
             }),
+            agent: None,
             standing: 0,
         }
     }
@@ -418,6 +428,48 @@ mod tests {
         let narrower = status_bar(&with_guidance, cells(&full) - 1);
         assert!(!text(&narrower).contains('📜'));
         assert!(text(&narrower).contains("📁 Operations"));
+    }
+
+    #[test]
+    fn the_agent_shows_by_name_beside_the_guidance_hint_and_outlasts_the_folder() {
+        let git = GitStatus {
+            branch: "main".into(),
+            ..GitStatus::default()
+        };
+        let with_agent = BarState {
+            agent: Some("careful-reviewer"),
+            standing: 1,
+            ..state(Some(&git))
+        };
+        let full = status_bar(&with_agent, 200);
+        assert_eq!(
+            text(&full),
+            "🤖 qwen3.8:27b  🧠 high  📁 Operations  🌿 main  🎭 careful-reviewer  📜 1  ctx:[▉·········]9%"
+        );
+        assert!(
+            full.runs
+                .contains(&(Role::AgentLabel, "🎭 careful-reviewer".to_owned()))
+        );
+        // Narrowing drops guidance, git, the folder, then the agent.
+        let mut shown: Vec<String> = Vec::new();
+        for width in (1..=cells(&full)).rev() {
+            let bar = text(&status_bar(&with_agent, width));
+            if shown.last() != Some(&bar) {
+                shown.push(bar);
+            }
+        }
+        assert_eq!(
+            shown,
+            [
+                "🤖 qwen3.8:27b  🧠 high  📁 Operations  🌿 main  🎭 careful-reviewer  📜 1  ctx:[▉·········]9%",
+                "🤖 qwen3.8:27b  🧠 high  📁 Operations  🌿 main  🎭 careful-reviewer  ctx:[▉·········]9%",
+                "🤖 qwen3.8:27b  🧠 high  📁 Operations  🎭 careful-reviewer  ctx:[▉·········]9%",
+                "🤖 qwen3.8:27b  🧠 high  🎭 careful-reviewer  ctx:[▉·········]9%",
+                "🤖 qwen3.8:27b  🧠 high  ctx:[▉·········]9%",
+                "🤖 qwen3.8:27b  ctx:[▉·········]9%",
+                "🤖 qwen3.8:27b",
+            ]
+        );
     }
 
     #[test]

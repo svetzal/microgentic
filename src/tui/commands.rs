@@ -12,6 +12,8 @@ pub(super) enum Command {
     SetEffort(Option<String>),
     Clear,
     Guidance,
+    /// Report the agent file the conversation works as.
+    Agent,
     /// Show or hide the context panel.
     Context,
 }
@@ -48,7 +50,7 @@ impl CommandSpec {
 }
 
 /// One table drives help, footer hints, and Tab completion.
-const COMMANDS: [CommandSpec; 6] = [
+const COMMANDS: [CommandSpec; 7] = [
     CommandSpec {
         name: "/model",
         argument: Some("[id]"),
@@ -68,6 +70,11 @@ const COMMANDS: [CommandSpec; 6] = [
         name: "/guidance",
         argument: None,
         summary: "List the project guidance files and their status",
+    },
+    CommandSpec {
+        name: "/agent",
+        argument: None,
+        summary: "Show the agent file this conversation works as",
     },
     CommandSpec {
         name: "/context",
@@ -104,8 +111,9 @@ pub(super) fn parse_submission(input: &str) -> Submission {
         ("/help", "") => Command::Help,
         ("/clear", "") => Command::Clear,
         ("/guidance", "") => Command::Guidance,
+        ("/agent", "") => Command::Agent,
         ("/context", "") => Command::Context,
-        ("/help" | "/clear" | "/guidance" | "/context", _) => {
+        ("/help" | "/clear" | "/guidance" | "/agent" | "/context", _) => {
             return Submission::Invalid(format!("{name} does not take an argument."));
         }
         ("/model", "") => Command::ShowModel,
@@ -224,6 +232,7 @@ mod tests {
         assert_eq!(command("/help"), Command::Help);
         assert_eq!(command("/clear"), Command::Clear);
         assert_eq!(command("/guidance"), Command::Guidance);
+        assert_eq!(command("/agent"), Command::Agent);
         assert_eq!(command("/context"), Command::Context);
         assert_eq!(command("/model"), Command::ShowModel);
         assert_eq!(
@@ -297,6 +306,10 @@ mod tests {
             invalid("/context all"),
             "/context does not take an argument."
         );
+        assert_eq!(
+            invalid("/agent reviewer"),
+            "/agent does not take an argument."
+        );
     }
 
     #[test]
@@ -331,7 +344,10 @@ mod tests {
         let footer_text = |input: &str| rows_text(&wrap(&footer(input, false), 200)).remove(0);
         assert!(footer_text("").starts_with("Enter send"));
         assert!(footer_text("/e").starts_with("/effort [level] · Show or set"));
-        assert!(footer_text("/").contains("/model  /effort  /clear  /guidance  /context  /help"));
+        assert!(
+            footer_text("/")
+                .contains("/model  /effort  /clear  /guidance  /agent  /context  /help")
+        );
         assert!(footer_text("/g").starts_with("/guidance · List the project guidance"));
         assert!(footer_text("/z").starts_with("No matching command"));
     }
@@ -341,6 +357,7 @@ mod tests {
         assert_eq!(complete("/m").as_deref(), Some("/model "));
         assert_eq!(complete("/cl").as_deref(), Some("/clear"));
         assert_eq!(complete("/co").as_deref(), Some("/context"));
+        assert_eq!(complete("/a").as_deref(), Some("/agent"));
         assert_eq!(complete("/c"), None);
         assert_eq!(complete("/"), None);
         assert_eq!(complete("/model x"), None);

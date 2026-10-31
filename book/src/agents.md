@@ -5,9 +5,13 @@ Rust craftsperson, as a documentation writer. Use `--agent` to load one into
 the model's system context for a run.
 
 ```sh
+microgentic --agent rust-craftsperson
 microgentic run --agent rust-craftsperson --prompt 'Add a --verbose flag'
 microgentic run --agent ./agents/reviewer.md --prompt 'Review this diff' < changes.diff
 ```
+
+In the conversation, give `--agent` when you open it. It applies to every
+message until you close the view. See [The conversation](conversation.md).
 
 Agent files use the same format as Claude Code agent definitions, so the files
 in `~/.claude/agents/` work as they are.
@@ -67,6 +71,9 @@ or both.
 file. The coordinator, the part of `run` that talks to you and writes the
 brief, gets only one line that names the agent. This keeps its brief small.
 
+The conversation does its work itself, so each message carries the whole
+agent file.
+
 ## Size limit
 
 The body of an agent file is limited to 6,000 estimated tokens. With a smaller
@@ -77,7 +84,17 @@ Microgentic does not cut an agent file. If the body is too large, the run stops
 before it starts. The error names the file, its estimated size, and the limit.
 Use a shorter agent file, or a model with a larger context window.
 
+The conversation checks the file against the model's known window before the
+view opens. Each message checks it again against the window the provider
+reports, so a message can fail with the same error if the window is smaller
+than expected, or after `/model` selects a smaller model.
+
 ## See what loaded
+
+In the conversation, the status bar shows `🎭` and the agent's name. `/agent`
+reads the file again and shows its name, path, size, estimated tokens, and
+the frontmatter keys Microgentic ignores. If you edit the file, the next
+message uses the new text.
 
 Each run's trace has a `context.agent.loaded` event. It records the file's
 path, name, SHA-256, size, estimated tokens, the ignored frontmatter keys, and

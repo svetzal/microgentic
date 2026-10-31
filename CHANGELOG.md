@@ -38,6 +38,11 @@ The release workflow publishes each version's section as its GitHub release note
   Each trace records `context.agent.loaded`. Benchmark runs, advanced runs,
   `run-sequential`, and the compatibility executable refuse `--agent`; runs
   without it send unchanged provider requests.
+- `microgentic --agent <name|path>` opens the conversation working as an
+  agent file. The file is read before the view opens, so problems are
+  reported on the ordinary terminal, and each message carries the whole file.
+  The status bar shows `🎭` and the agent's name, and `/agent` reports the
+  file's name, path, size, and ignored frontmatter.
 
 ### Changed
 

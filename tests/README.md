@@ -639,6 +639,16 @@ error and complete listing input, then sends a normal message and verifies the
 unchanged model, actual prompt, successful answer and context-discovery input.
 This covers the listing boundary independently of the conversation worker.
 
+`tui_works_as_an_agent_file_{omlx,ollama}` launches `microgentic --agent <path>`
+on the PTY. It asserts the rendered `🎭` status-bar segment beside the `📜`
+count, the `/agent` report (name, path, size, estimated tokens, ignored
+frontmatter), and that the worker's captured request carries the whole agent
+section before the project guidance heading. The exchange trace's
+`context.agent.loaded` records the path, `full_section` delivery and ignored
+keys. In-process cases in `cli::agent_runs` check that `--agent` is top-level
+only (absent from `setup` and `benchmark` help, refused before a subcommand)
+and that a bad agent file is reported before the terminal check.
+
 `tests/fixtures/tui_gateway.json` is the internal regression specification
 `microgentic_tui_gateway.v1` (SHA-256
 `29c923b7ec46df41c3a20209d15bbd5a017e29ac07a06a8f6b205350ef72a875`). It specifies the entire initial request and

@@ -9,6 +9,16 @@ ordinary replies. When you ask for work, the model uses tools to inspect, edit,
 and check the project. Follow-up messages keep the earlier messages, replies,
 and tool results.
 
+To work as an agent for the whole conversation, give an
+[agent file](agents.md) when you open it:
+
+```sh
+microgentic --agent rust-craftsperson
+```
+
+Microgentic reads the file before the view opens, so a bad name or file is
+reported on the ordinary terminal. Each message carries the whole file.
+
 ## Keys
 
 | Key | Action |
@@ -40,6 +50,7 @@ Commands that start with `/` run in the view. They are never sent to the model.
 | `/effort` | Pick a reasoning effort |
 | `/effort <level>` | Set the effort: `disabled`, `enabled`, `low`, `medium`, `high`, `xhigh`, or `default` |
 | `/guidance` | List the project guidance files, with their size and status |
+| `/agent` | Show the agent file the conversation works as: name, path, size, and ignored frontmatter |
 | `/context` | Show or hide the [context panel](#context-panel), like Ctrl-O |
 | `/clear` | Start a new conversation |
 | `/help` | List the commands |
@@ -62,7 +73,7 @@ the reply to finish, so a reply never changes settings while it runs.
 The status bar is below the input:
 
 ```text
-🤖 qwen3.8:27b-mxfp8  🧠 low  📁 microgentic  🌿 main ●3 …2 ↑1  📜 2  ctx:[███·······]31%
+🤖 qwen3.8:27b-mxfp8  🧠 low  📁 microgentic  🌿 main ●3 …2 ↑1  🎭 rust-craftsperson  📜 2  ctx:[███·······]31%
 ```
 
 | Part | Meaning |
@@ -71,6 +82,7 @@ The status bar is below the input:
 | 🧠 | The reasoning effort (`default` when unset) |
 | 📁 | The project folder |
 | 🌿 | The Git branch, changed files (`●`), untracked files (`…`), and commits ahead (`↑`) or behind (`↓`) |
+| 🎭 | The [agent file](agents.md) the conversation works as, when you gave `--agent` |
 | 📜 | Standing items in context: the project guidance files in the latest request. Before the first request, the files Microgentic found |
 | `ctx:` | The estimated size of the latest request, as a part of the context window |
 
@@ -78,7 +90,7 @@ The context gauge is green below 60%, yellow to 85%, and red above. Microgentic
 asks the provider for the model's context window once per conversation. When
 the window is still unknown, the gauge shows only the token estimate, for
 example `ctx: 12.4k`. On a narrow terminal, the `📜` count goes first, then
-the Git, folder, and effort parts.
+the Git, folder, agent, and effort parts.
 
 ## Tool activity
 
@@ -147,7 +159,7 @@ name each call, and tool results name the call they answer. The kinds are:
 
 | Kind | What it is |
 | --- | --- |
-| system prompt | Microgentic's standing instructions |
+| system prompt | Microgentic's standing instructions, and the agent file when you gave `--agent` |
 | project guidance | Your `AGENTS.md` files, part of the system message |
 | nested project guidance | A deeper `AGENTS.md`, sent when work reached its folder |
 | retained user prompt | One of your earlier messages |
