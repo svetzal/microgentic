@@ -44,23 +44,47 @@ completed responses. Repair pruning must protect the current user task as well a
 earlier conversation prompts. Stream presentation observes the existing runtime;
 benchmark entry points never load ambient conversation history.
 
-An open TUI has no assumed engineering task. The user's conversation supplies
-work requests; ordinary replies can finish without task status tokens. Preserve
-quoted examples as data and keep observational shell checks separate from
-executor-owned acceptance probes. Benchmark task prompting, probe authority, and
-terminal rules remain on the existing task path.
+Microgentic works as two nested agents. The conversation is the coordinator.
+An open TUI or everyday `run` has no assumed engineering task: the user and the
+coordinator investigate, discuss, and work out a thought until they agree on
+work worth doing. Ordinary replies finish an exchange without task status
+tokens. The coordinator inspects the project but does not change it. Its
+`start_task` tool begins engineering work.
+
+`start_task` gathers what should be known before building as structured fields:
+the goal, the relevant parts of the conversation, constraints, and how success
+will be checked. The fields exist to help the user and the coordinator think the
+work through. The user reviews the brief before work starts. The coordinator
+then writes it as a run contract.
+
+The run contract is the engineering subagent's only task input. Its guidance is
+plain text: the task as a person would hand it over. Beside the text, as data,
+it may carry acceptance probes and read and write scopes, which the harness
+enforces. Checks travel as probes rather than prose, so no model has to notice
+them for them to count. The subagent starts from the contract and the
+workspace, not from the conversation, and runs until its stop rules end the
+work. It owns task prompting, probe execution, validation authority, repair,
+and terminal rules. Quoted examples stay data, and observational shell checks
+stay separate from probes. It returns its outcome, changes, and checks to the
+coordinator, which reports them in conversation.
+
+Today's code predates this model: everyday conversation and benchmark task mode
+are separate loops. `PUBLIC_READINESS.md` tracks the migration.
 
 Show the TUI evidence footer for project-tool activity in the current exchange.
 Ordinary chat stays free of that footer, including conversational replies after
 completed work. Keep all traces saved and use structured activity events rather
 than prompt classification to control presentation. This changes no task authority.
 
-Benchmark task mode is explicit: `microgentic benchmark run` and
-`benchmark run-sequential` read experiment files and emit JSON. Keep personal
-setup, stdin intake, and conversation history outside this path. Preserve the
-pre-UX task prompting, validation authority, runtime defaults, and stop rules
-through the shared task runtime. Exact historical reproduction still needs pinned
-binaries, dependencies, adapters, and provider configuration.
+Benchmark mode is glue. `microgentic benchmark run` and
+`benchmark run-sequential` read a run contract from experiment files (or a plain
+`task.md`, resolved into one), hand it straight to the engineering subagent, and
+emit JSON. The contract format is the shared interface between `start_task` and
+any benchmark harness. They skip the coordinator, personal
+setup, stdin intake, and conversation history, and change nothing about how the
+subagent works. A benchmark score therefore measures the same engineering loop
+users get. Exact historical reproduction still needs pinned binaries,
+dependencies, adapters, and provider configuration.
 
 ## Responsibilities
 
