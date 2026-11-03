@@ -326,6 +326,14 @@ its analyzer classification.
 
 ## Request recovery lifecycle
 
+Session intent requests have their own trace files under
+`session-<id>/intent-traces/`. `session.intent.requested` records the bounded,
+credential-filtered message excerpts, provider, model, source digest, disabled
+thinking, output limit, and empty tool set. Terminal events are
+`session.intent.completed`, `session.intent.failed`, `session.intent.superseded`,
+and `session.intent.cancelled`. Completed summaries are advisory list labels,
+never conversation messages, task instructions, or evidence of task completion.
+
 `llm.completion.output_limit` records a provider-confirmed output limit detected
 from Mojentic's typed `CompletionDecodeError::Length` cause. It adds an
 actionable diagnosis without changing the recovery outcome or stop policy.

@@ -29,6 +29,53 @@ pub(super) struct History {
 }
 
 impl History {
+    /// Rebuild a readable history without turning saved tool calls into live
+    /// activity or implying their old observations are fresh checks.
+    pub(super) fn restore(&mut self, messages: &[mojentic::llm::models::LlmMessage]) {
+        use mojentic::llm::models::MessageRole;
+        let secrets = crate::recovery::credentials();
+        for message in messages {
+            let Ok(mut value) = serde_json::to_value(message) else {
+                continue;
+            };
+            crate::recovery::redact_value(&mut value, &secrets);
+            let Ok(message) = serde_json::from_value::<mojentic::llm::models::LlmMessage>(value)
+            else {
+                continue;
+            };
+            match message.role {
+                MessageRole::User => {
+                    self.start_block();
+                    self.push(Role::UserLabel, "You: ");
+                    self.push(Role::Plain, message.content.as_deref().unwrap_or_default());
+                }
+                MessageRole::Assistant => {
+                    self.start_block();
+                    self.push(Role::AgentLabel, "Microgentic: ");
+                    self.push(Role::Plain, message.content.as_deref().unwrap_or_default());
+                    for call in message.tool_calls.unwrap_or_default() {
+                        self.start_line();
+                        let arguments = serde_json::to_value(call.arguments).unwrap_or_default();
+                        self.push(
+                            Role::Muted,
+                            &format!(
+                                "  · {} (saved tool call)\n",
+                                super::tool_lines::summarize(&call.name, &arguments)
+                            ),
+                        );
+                    }
+                }
+                MessageRole::Tool => {
+                    self.start_line();
+                    let preview =
+                        crate::sessions::plain(message.content.as_deref().unwrap_or_default(), 160);
+                    self.push(Role::Muted, &format!("  Saved observation: {preview}\n"));
+                }
+                MessageRole::System => {}
+            }
+        }
+    }
+
     pub(super) fn push(&mut self, role: Role, text: &str) {
         match self.entries.last_mut() {
             Some(Entry::Text(styled)) => styled.push(role, text),

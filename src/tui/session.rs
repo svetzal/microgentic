@@ -28,6 +28,9 @@ pub(super) struct Session {
     /// None until the first message, and again after `/clear` or a model
     /// change. Effort changes keep the current conversation.
     pub(super) state: Option<PathBuf>,
+    pub(super) owner: Option<crate::sessions::Lease>,
+    pub(super) preserve_reasoning: bool,
+    summary: Option<JoinHandle<()>>,
     pub(super) model_listing: Option<JoinHandle<Result<Vec<String>, String>>>,
     /// The project's git state for the status bar, `None` outside a repository.
     pub(super) git: Option<GitStatus>,
@@ -49,6 +52,9 @@ impl Session {
             root,
             settings,
             state: None,
+            owner: None,
+            preserve_reasoning: false,
+            summary: None,
             model_listing: None,
             git: None,
             git_refresh: None,
@@ -56,6 +62,19 @@ impl Session {
             guidance: Discovery::default(),
             guidance_refresh: None,
             agent: None,
+        }
+    }
+
+    pub(super) fn stop_summary(&mut self) {
+        if let Some(summary) = self.summary.take() {
+            summary.abort();
+        }
+    }
+
+    pub(super) fn refresh_summary(&mut self) {
+        self.stop_summary();
+        if let Some(path) = self.state.clone() {
+            self.summary = Some(tokio::spawn(crate::sessions::refresh_intent(path)));
         }
     }
 
@@ -124,6 +143,8 @@ impl Session {
     /// starts a new conversation. Old session files stay on disk with traces.
     fn change_model(&mut self, model: String) -> String {
         self.settings.model = model;
+        self.stop_summary();
+        self.owner = None;
         let mut note = String::new();
         if self.state.take().is_some() {
             note.push_str(" Your next message starts a new conversation, because a conversation keeps the model it began with.");
@@ -164,6 +185,8 @@ pub(super) fn run_command(view: &mut View, session: &mut Session, command: Comma
             }
         }
         Command::Clear => {
+            session.stop_summary();
+            session.owner = None;
             session.state = None;
             view.forget_context();
             view.guidance_shown.clear();
@@ -219,6 +242,24 @@ pub(super) fn run_command(view: &mut View, session: &mut Session, command: Comma
             format!("Effort is already {}.\n", effort_label(&session.settings))
         }
         Command::SetEffort(effort) => {
+            if let Some(path) = session.state.as_ref().filter(|path| path.exists()) {
+                let saved = (|| -> anyhow::Result<()> {
+                    let mut state = crate::conversation::load_saved(path)?;
+                    state.reasoning_effort = effort
+                        .as_deref()
+                        .map(crate::cli::parse_reasoning_effort)
+                        .transpose()
+                        .map_err(anyhow::Error::msg)?;
+                    crate::conversation::save_saved(path, &state)
+                })();
+                if let Err(error) = saved {
+                    view.history.push(
+                        Role::Error,
+                        &format!("Could not save effort; setting unchanged: {error:#}\n"),
+                    );
+                    return;
+                }
+            }
             session.settings.reasoning_effort = effort;
             format!(
                 "Effort set to {} for the next request. Conversation history kept. Use microgentic setup to make it the default.\n",
@@ -227,6 +268,12 @@ pub(super) fn run_command(view: &mut View, session: &mut Session, command: Comma
         }
     };
     view.history.push(Role::System, &output);
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        self.stop_summary();
+    }
 }
 
 fn discover_guidance(

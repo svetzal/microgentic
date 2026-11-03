@@ -7,11 +7,15 @@ Every command has `--help`, with examples.
 | Command | What it does |
 | --- | --- |
 | `microgentic` | Open the conversation view in the current directory |
+| `microgentic session list` | List saved conversations for this project, using cached intent sentences |
+| `microgentic session resume <id>` | Reopen a conversation and wait for your next message |
 | `microgentic setup` | Show the provider, model, and effort settings it would save |
 | `microgentic setup --apply` | Save those settings |
 | `microgentic run` | Send one prompt from stdin or `--prompt`, and write the reply to stdout. Can edit the project |
 
 All commands accept `--config <path>` to read settings from a different file.
+
+Session listing also accepts `--all` and `--json`. See [Saved sessions](sessions.md).
 
 `microgentic --agent <name|path>` and `microgentic run --agent <name|path>` load
 an agent file that describes how to approach the work. See

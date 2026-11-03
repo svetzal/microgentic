@@ -72,15 +72,25 @@ pub(crate) enum ConversationEvent {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct SessionState {
+pub(crate) struct SessionState {
     schema_version: String,
-    root: PathBuf,
-    provider: Provider,
-    model: String,
-    reasoning_effort: Option<ReasoningEffort>,
-    preserve_reasoning: bool,
-    messages: Vec<LlmMessage>,
-    last_error: Option<String>,
+    pub(crate) root: PathBuf,
+    pub(crate) provider: Provider,
+    pub(crate) model: String,
+    pub(crate) reasoning_effort: Option<ReasoningEffort>,
+    pub(crate) preserve_reasoning: bool,
+    pub(crate) messages: Vec<LlmMessage>,
+    pub(crate) last_error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) agent_path: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) config_path: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) standing_context_limit: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) guidance_fraction: Option<f64>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) resume_notice: bool,
     /// Paths and hashes of the project guidance the last exchange used.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     guidance: Vec<(String, String)>,
@@ -88,6 +98,32 @@ struct SessionState {
     /// exchanges do not ask again.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     context_window: Option<crate::context_window::ContextWindow>,
+}
+
+pub(crate) fn load_saved(path: &Path) -> Result<SessionState> {
+    let file = std::fs::File::open(path)
+        .with_context(|| format!("reading saved conversation {}", path.display()))?;
+    let mut bytes = Vec::new();
+    file.take(64 * 1024 * 1024 + 1).read_to_end(&mut bytes)?;
+    if bytes.len() > 64 * 1024 * 1024 {
+        bail!("conversation state exceeds the 64 MiB limit");
+    }
+    let state: SessionState =
+        serde_json::from_slice(&bytes).context("reading conversation state")?;
+    if state.schema_version != "microgentic_conversation.v1" {
+        bail!("unsupported saved conversation version");
+    }
+    validate_history(&state.messages)?;
+    Ok(state)
+}
+
+pub(crate) fn save_saved(path: &Path, state: &SessionState) -> Result<()> {
+    let mut file = tempfile::NamedTempFile::new_in(path.parent().context("session parent")?)?;
+    serde_json::to_writer(&mut file, state)?;
+    file.write_all(b"\n")?;
+    file.as_file().sync_all()?;
+    file.persist(path).context("saving conversation state")?;
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -182,6 +218,11 @@ impl ConversationRun {
                 preserve_reasoning: config.preserve_reasoning,
                 messages: Vec::new(),
                 last_error: None,
+                agent_path: None,
+                config_path: None,
+                standing_context_limit: None,
+                guidance_fraction: None,
+                resume_notice: false,
                 guidance: Vec::new(),
                 context_window: None,
             },
@@ -201,6 +242,9 @@ impl ConversationRun {
         // Effort is a request control, not conversation identity. Retain the
         // completed native history and record the setting used for this request.
         state.reasoning_effort = config.reasoning_effort;
+        state.agent_path = config.agent.as_ref().map(|agent| agent.path.clone());
+        state.standing_context_limit = config.standing_context_limit;
+        state.guidance_fraction = config.guidance_fraction;
         // Reserve half the input allowance for the new task, tools and repairs.
         // Remove complete oldest exchanges only; never split a tool-call batch.
         let allowance = config
@@ -284,6 +328,9 @@ impl ConversationRun {
 
     pub(crate) fn initial_messages(&self, system: String, mut task: String) -> Vec<LlmMessage> {
         let state = self.state.lock().expect("conversation mutex poisoned");
+        if state.resume_notice {
+            task.push_str("\n\n[Microgentic session notice: this conversation was reopened after quitting. Earlier messages and tool results are historical observations. Inspect current project state and obtain fresh validation before relying on earlier results. Do not replay completed tool calls. No interrupted generation or engineering execution has been resumed.]");
+        }
         if let Some(error) = &state.last_error {
             task.push_str(&format!("\n\n[Microgentic session notice: the previous request stopped: {error}. Only completed responses and tool batches were retained. Inspect current project state before relying on earlier tool observations.]"));
         }
@@ -452,12 +499,8 @@ impl ConversationRun {
     fn save(&self, path: &Path, error: Option<String>) -> Result<()> {
         let mut state = self.state.lock().expect("conversation mutex poisoned");
         state.last_error = error;
-        let mut file = tempfile::NamedTempFile::new_in(path.parent().context("session parent")?)?;
-        serde_json::to_writer(&mut file, &*state)?;
-        file.write_all(b"\n")?;
-        file.as_file().sync_all()?;
-        file.persist(path).context("saving conversation state")?;
-        Ok(())
+        state.resume_notice = false;
+        save_saved(path, &state)
     }
 }
 
@@ -566,9 +609,16 @@ pub(crate) async fn run_worker(
     mut config: AgentRunConfig,
     prompt: String,
     path: PathBuf,
+    config_path: Option<PathBuf>,
 ) -> Result<()> {
+    let _worker = crate::sessions::Lease::worker(&path)?;
     let (events, mut receiver) = unbounded_channel();
     let conversation = Arc::new(ConversationRun::open(&path, &config, prompt, events)?);
+    conversation
+        .state
+        .lock()
+        .expect("conversation mutex poisoned")
+        .config_path = config_path;
     if let Some(configured) = config.context_window.take() {
         config.context_window = Some(
             conversation
@@ -726,6 +776,11 @@ mod tests {
                 preserve_reasoning: true,
                 messages: history,
                 last_error: None,
+                agent_path: None,
+                config_path: None,
+                standing_context_limit: None,
+                guidance_fraction: None,
+                resume_notice: false,
                 guidance: Vec::new(),
                 context_window: None,
             }),

@@ -14,6 +14,11 @@ Each `run` and each conversation has its own directory below `runs`. A
 conversation is saved as `session-*/conversation.json`, with private file
 permissions. Traces stay on disk when you start a new conversation.
 
+Each session may also contain `intent.json`, its cached intent sentence, and
+`intent-traces/`, the advisory summary requests. `owner.lock` and `worker.lock`
+protect active sessions. Their files can remain after exit; the operating
+system releases the locks when their owners close or exit.
+
 ## Credentials
 
 Microgentic does not save credentials. It reads `OMLX_API_KEY` from the

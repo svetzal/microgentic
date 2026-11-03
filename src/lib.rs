@@ -24,6 +24,7 @@ pub mod run_report;
 pub mod runtime;
 pub mod runtime_events;
 pub mod semantic_advisory;
+mod sessions;
 mod sha256;
 mod signals;
 pub mod start_task;

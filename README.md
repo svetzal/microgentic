@@ -55,6 +55,7 @@ to the user-focused control surface.
 ## Capabilities
 
 - Ongoing terminal conversations with streamed replies and retained context
+- Saved conversation listing and resume, with cached model-written intent sentences
 - Provider setup and prompt runs through stdin or `--prompt`
 - Typed run contracts for scope, guidance, probes, budgets, and terminal rules
 - Scoped filesystem and tool execution

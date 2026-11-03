@@ -69,7 +69,7 @@ pub(crate) fn parse_reasoning_effort(
     name = "microgentic",
     version,
     about = "An adaptive coding agent optimized for small models",
-    after_help = "Examples:\n  microgentic\n  microgentic --agent reviewer\n  microgentic setup\n  echo 'Hello!' | microgentic run\n  microgentic run --prompt 'Fix the parser'\n\nRun uses the existing agent tool and validation policies and can edit the selected project."
+    after_help = "Examples:\n  microgentic\n  microgentic --agent reviewer\n  microgentic session list\n  microgentic session resume session-AbCd12\n  microgentic setup\n  echo 'Hello!' | microgentic run\n  microgentic run --prompt 'Fix the parser'\n\nRun uses the existing agent tool and validation policies and can edit the selected project."
 )]
 struct Cli {
     /// User configuration file (default: $XDG_CONFIG_HOME/microgentic/config.json).
@@ -668,6 +668,11 @@ mod tests {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Find saved conversations or reopen one without starting work.
+    Session {
+        #[command(subcommand)]
+        command: SessionCommand,
+    },
     /// Configure provider, default model, and reasoning effort (previews unless --apply).
     Setup(SetupArgs),
 
@@ -832,6 +837,32 @@ enum Command {
 }
 
 #[derive(Debug, Subcommand)]
+enum SessionCommand {
+    /// List saved conversations for this project; reads cached summaries only.
+    #[command(
+        after_help = "Examples:\n  microgentic session list\n  microgentic session list --all --json"
+    )]
+    List {
+        /// Include conversations from other projects.
+        #[arg(long)]
+        all: bool,
+        /// Emit structured session metadata as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Reopen a saved conversation and wait for your next message.
+    #[command(
+        after_help = "Examples:\n  microgentic session resume session-AbCd12\n  microgentic session resume session-AbCd12 --agent reviewer\n\nRestores the saved project and model settings. Does not replay tools or resume interrupted execution."
+    )]
+    Resume {
+        id: String,
+        /// Override the saved agent file, or supply one for an older session.
+        #[arg(long)]
+        agent: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 #[command(
     after_help = "Examples:\n  microgentic benchmark run --experiment ./cell --dir ./cell/workspace\n  microgentic benchmark run --experiment ./cell --contract contract.json --provider ollama --model qwen3.8:27b-mxfp8\n\nUses task.md by default. Ignores stdin, personal setup, and conversation history. Outputs the complete JSON summary. Provider environment variables still select server URLs and credentials."
 )]
@@ -981,6 +1012,52 @@ async fn dispatch_cli(
         ));
     }
     match command {
+        Command::Session { command } => match command {
+            SessionCommand::List { all, json } => {
+                let project = std::env::current_dir()?.canonicalize()?;
+                let (sessions, warnings) = crate::sessions::list(
+                    &crate::preferences::state_root()?,
+                    (!all).then_some(project.as_path()),
+                )?;
+                for warning in warnings {
+                    writeln!(stderr, "{warning}")?;
+                }
+                if json {
+                    writeln!(stdout, "{}", serde_json::to_string_pretty(&sessions)?)?;
+                } else if sessions.is_empty() {
+                    writeln!(
+                        stdout,
+                        "No saved conversations found. Try microgentic session list --all."
+                    )?;
+                } else {
+                    for session in sessions {
+                        writeln!(
+                            stdout,
+                            "{} · {} · {} UTC",
+                            session.id,
+                            session.status,
+                            session.updated_at.format("%Y-%m-%d %H:%M")
+                        )?;
+                        writeln!(stdout, "  {}", session.intent)?;
+                        writeln!(
+                            stdout,
+                            "  {} · {}",
+                            crate::sessions::plain(&session.project.display().to_string(), 240),
+                            crate::sessions::plain(&session.model, 100)
+                        )?;
+                    }
+                    writeln!(stdout, "Resume with: microgentic session resume SESSION_ID")?;
+                }
+            }
+            SessionCommand::Resume { id, agent } => {
+                if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+                    bail!(
+                        "session resume needs a terminal; use microgentic session list --json to inspect saved sessions"
+                    );
+                }
+                crate::tui::resume(cli.config, &id, agent).await?;
+            }
+        },
         Command::Setup(args) => setup(args, cli.config.as_deref())?,
         Command::Run(run) => {
             let json = run.json || legacy;
@@ -1033,7 +1110,7 @@ async fn dispatch_cli(
             let session_state = absolute(&session_state)?;
             // The TUI already resolved and sealed its settings at session entry.
             let config = prepare_run_with_mode(run, cli.config.as_deref(), true, true)?;
-            crate::conversation::run_worker(config, prompt, session_state).await?;
+            crate::conversation::run_worker(config, prompt, session_state, cli.config).await?;
         }
         Command::Benchmark { command } => match command {
             BenchmarkCommand::Run(run) => {
