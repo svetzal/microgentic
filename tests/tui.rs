@@ -501,11 +501,16 @@ fn conversation(binary: &str, wire: Wire) {
         "cancellation was treated as completed conversation"
     );
     assert!(!saved["messages"].to_string().contains("UNFINISHED-REPLY"));
+    session.tui.submit("/effort disabled");
+    session.tui.wait_text("Conversation history kept.");
     session.exchange(
         "Continue after cancellation; keep our codename.",
         "RECOVERED",
     );
     let requests = session.provider.requests();
+    assert_eq!(requests[4]["effort"], "Some(Disabled)");
+    assert_eq!(session.workspace.session_files(), 1);
+    assert_eq!(session.session_state()["reasoning_effort"], "disabled");
     assert!(
         user_messages(&requests[4])
             .last()
@@ -792,11 +797,16 @@ fn commands(wire: Wire) {
     session.tui.send(b"\x1b[B\x1b[B\r"); // low, medium, high, then Enter.
     session
         .tui
-        .wait_text("Effort set to high for this session.");
+        .wait_text("Effort set to high for the next request.");
     session.tui.wait_text("🤖 other-model  🧠 high");
     let raised = exchange(&mut session, "After the effort change.");
     assert_eq!(raised["model"], "other-model");
     assert_eq!(effort(&raised), "Some(High)");
+    assert!(
+        raised["messages"]
+            .to_string()
+            .contains("After the model switch.")
+    );
     let kept = exchange(&mut session, "Still the same settings.");
     assert!(
         kept["messages"]
@@ -820,16 +830,18 @@ fn commands(wire: Wire) {
     );
     assert_eq!(
         session.workspace.session_files(),
-        4,
+        3,
         "clearing or switching deleted retained session state"
     );
 
     session.tui.submit("/effort default");
     session
         .tui
-        .wait_text("Effort set to model default for this session.");
+        .wait_text("Effort set to model default for the next request.");
     let unset = exchange(&mut session, "With the model default effort.");
     assert!(effort(&unset) == "None", "{unset}");
+    assert!(unset["messages"].to_string().contains("After clearing."));
+    assert_eq!(session.workspace.session_files(), 3);
 
     let escaped = exchange(&mut session, "//etc/hosts is a path, not a command.");
     assert_eq!(

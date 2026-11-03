@@ -191,7 +191,6 @@ impl ConversationRun {
             || state.root != root
             || state.provider != config.provider
             || state.model != config.model
-            || state.reasoning_effort != config.reasoning_effort
             || state.preserve_reasoning != config.preserve_reasoning
         {
             bail!(
@@ -199,6 +198,9 @@ impl ConversationRun {
             );
         }
         validate_history(&state.messages)?;
+        // Effort is a request control, not conversation identity. Retain the
+        // completed native history and record the setting used for this request.
+        state.reasoning_effort = config.reasoning_effort;
         // Reserve half the input allowance for the new task, tools and repairs.
         // Remove complete oldest exchanges only; never split a tool-call batch.
         let allowance = config

@@ -12,6 +12,9 @@ The release workflow publishes each version's section as its GitHub release note
 
 ### Fixed
 
+- Changing `/effort` now keeps completed conversation history and applies the
+  setting to the next request. After a stopped reply, earlier decisions and
+  completed tool results remain available without repeating them.
 - Output-limit failures now explain when a model exhausted its token allowance,
   including reasoning-only output, and give recovery steps for the conversation
   and CLI. Traces retain the typed recovery failure and add output-limit counts.

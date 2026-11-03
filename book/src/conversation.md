@@ -59,9 +59,9 @@ In a picker, Up and Down move, Home and End go to the first and last option,
 Enter chooses, and Esc closes the picker with no change.
 
 `/model` and `/effort` change the setting for this session only. To change your
-saved defaults, use `microgentic setup`. A conversation keeps the model and
-effort it started with, so after a change your next message starts a new
-conversation.
+saved defaults, use `microgentic setup`. An effort change applies to the next
+request and keeps completed conversation history, including after a stopped
+reply. Switching models starts a new conversation.
 
 To send a message that starts with `/`, type `//`.
 
@@ -191,8 +191,9 @@ The panel updates each time Microgentic sends a request, including the requests
 in a tool loop, and it keeps the last one after the reply. It shows the newest
 rows first. Use Alt-Page Up and Alt-Page Down (or Shift with Page Up and Page
 Down) to scroll it; a new request returns it to the newest rows. Before your
-first message, the panel says that there is no request yet. `/clear`, `/model`,
-and `/effort` start a new conversation, so they empty the panel.
+first message, the panel says that there is no request yet. `/clear` and `/model`
+start a new conversation, so they empty the panel. `/effort` keeps the panel's
+latest request until your next message produces a new one.
 
 The panel needs a terminal of at least 80 columns and 12 rows. In a smaller
 terminal the conversation keeps the full width, and the key hint line says that
@@ -232,8 +233,8 @@ with one smaller step. The follow-up starts a fresh request; it does not resume
 the interrupted stream.
 
 To reduce thinking, try `/effort low` or `/effort disabled`. Support depends on
-the model. Changing effort starts a new conversation, so include the task and
-relevant decisions in your next message.
+the model. The new effort applies to your next message and keeps completed
+conversation history. You do not need to repeat earlier task decisions.
 
 ## Evidence
 

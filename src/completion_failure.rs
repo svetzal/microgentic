@@ -67,7 +67,7 @@ impl OutputLimit {
         if conversation {
             message.push_str("\nAsk to continue with a smaller step; completed conversation history is retained. A follow-up starts a fresh request, not a continuation of the interrupted stream.");
             if self.reasoning_bytes > 0 {
-                message.push_str("\nTo reduce thinking, try /effort low or /effort disabled (model support varies; changing effort starts a new conversation).");
+                message.push_str("\nTo reduce thinking for the next request, try /effort low or /effort disabled (model support varies). Your conversation history is kept.");
             }
         } else {
             message.push_str("\nTry a smaller task, or rerun with a larger --max-tokens limit.");
