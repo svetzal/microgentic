@@ -621,10 +621,11 @@ gateway still needs recovery, reasoning, telemetry, and tool-history conformance
   effort. Provider switching, change
   review, check output, and the final diff remain.
 - [ ] **Keep the conversation across a model or effort switch.** Decided on
-  2026-10-15. Today a switch after the first message starts a new session file,
-  because `ConversationRun::open` refuses a different model or effort.
-  Relax that guard for model and effort only;
-  keep the project root and provider checks. Drop the previous model's retained
+  2026-10-15. Effort changes now keep the session file, completed native history,
+  stopped-request notice, and context panel. The worker applies the new effort
+  on the next request and records it in saved session metadata.
+  Model changes still start a new conversation. Relax the model guard while
+  keeping the project root and provider checks. Drop the previous model's retained
   reasoning, trim history to the new model's window, and report what was left out.
 - [ ] **Specify keyboard behavior.** Define send versus newline, history, scroll,
   help, and cancellation. Preserve input during resize. Define Ctrl-C and a

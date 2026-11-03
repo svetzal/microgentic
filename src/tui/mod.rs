@@ -1419,7 +1419,7 @@ mod tests {
         ));
         assert!(view.panel.is_none());
         assert_eq!(session.settings.reasoning_effort.as_deref(), Some("medium"));
-        assert!(history_text(&view).contains("Effort set to medium for this session."));
+        assert!(history_text(&view).contains("Effort set to medium for the next request."));
 
         run_command(&mut view, &mut session, Command::ShowEffort);
         handle_panel_key(&mut view, &mut session, key(KeyCode::Home));

@@ -25,8 +25,8 @@ fn effort_label(settings: &Preferences) -> &str {
 pub(super) struct Session {
     pub(super) root: PathBuf,
     pub(super) settings: Preferences,
-    /// None until the first message, and again after `/clear` or a model or
-    /// effort change, so the next message starts a new conversation.
+    /// None until the first message, and again after `/clear` or a model
+    /// change. Effort changes keep the current conversation.
     pub(super) state: Option<PathBuf>,
     pub(super) model_listing: Option<JoinHandle<Result<Vec<String>, String>>>,
     /// The project's git state for the status bar, `None` outside a repository.
@@ -120,13 +120,13 @@ impl Session {
         }
     }
 
-    /// The worker binds a conversation to its model and effort, so a change
+    /// The worker binds a conversation to its model, so a model change
     /// starts a new conversation. Old session files stay on disk with traces.
-    fn change_settings(&mut self, change: impl FnOnce(&mut Preferences)) -> String {
-        change(&mut self.settings);
+    fn change_model(&mut self, model: String) -> String {
+        self.settings.model = model;
         let mut note = String::new();
         if self.state.take().is_some() {
-            note.push_str(" Your next message starts a new conversation, because a conversation keeps the model and effort it began with.");
+            note.push_str(" Your next message starts a new conversation, because a conversation keeps the model it began with.");
         }
         note.push_str(" Use microgentic setup to make it the default.");
         note
@@ -192,7 +192,7 @@ pub(super) fn run_command(view: &mut View, session: &mut Session, command: Comma
             format!("Already using {model}.\n")
         }
         Command::SetModel(model) => {
-            let note = session.change_settings(|settings| settings.model = model.clone());
+            let note = session.change_model(model.clone());
             view.forget_context();
             format!("Model set to {model} for this session.{note}\n")
         }
@@ -219,10 +219,9 @@ pub(super) fn run_command(view: &mut View, session: &mut Session, command: Comma
             format!("Effort is already {}.\n", effort_label(&session.settings))
         }
         Command::SetEffort(effort) => {
-            let note = session.change_settings(|settings| settings.reasoning_effort = effort);
-            view.forget_context();
+            session.settings.reasoning_effort = effort;
             format!(
-                "Effort set to {} for this session.{note}\n",
+                "Effort set to {} for the next request. Conversation history kept. Use microgentic setup to make it the default.\n",
                 effort_label(&session.settings)
             )
         }
@@ -529,7 +528,7 @@ mod tests {
     }
 
     #[test]
-    fn changing_model_or_effort_starts_a_new_conversation_without_saving() {
+    fn changing_model_starts_a_new_conversation_but_effort_keeps_history() {
         let mut view = view();
         let mut session = session();
         run_command(&mut view, &mut session, Command::SetModel("second".into()));
@@ -552,8 +551,13 @@ mod tests {
 
         run_command(&mut view, &mut session, Command::SetEffort(None));
         assert_eq!(session.settings.reasoning_effort, None);
-        assert!(session.state.is_none());
-        assert!(history_text(&view).contains("Effort set to model default for this session."));
+        assert_eq!(
+            session.state,
+            Some(PathBuf::from("/state/session-2/conversation.json"))
+        );
+        assert!(history_text(&view).contains(
+            "Effort set to model default for the next request. Conversation history kept."
+        ));
     }
 
     #[tokio::test]

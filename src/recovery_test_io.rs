@@ -821,7 +821,7 @@ async fn public_run_output_limit_explains_reasoning_and_partial_output_without_r
             );
             assert_eq!(message.contains("Any partial reply is incomplete"), content);
             assert!(message.contains("/effort low"));
-            assert!(message.contains("starts a new conversation"));
+            assert!(message.contains("Your conversation history is kept"));
             assert!(message.contains("not retried automatically"));
             assert!(!message.contains("SemanticOutput"));
             assert!(!message.contains("private unfinished reasoning"));
