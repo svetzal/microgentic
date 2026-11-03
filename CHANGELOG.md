@@ -10,6 +10,19 @@ The release workflow publishes each version's section as its GitHub release note
 
 ## [Unreleased]
 
+### Added
+
+- `session list` finds saved conversations by project, with `--all` and `--json`
+  options. Each entry shows a cached model-written intent sentence or its first
+  user message, plus activity, state, project, model, and session ID.
+- `session resume <id>` reopens the saved project, conversation, model settings,
+  and agent-file selection. It waits for input, excludes partial replies, and
+  labels earlier tool observations as historical. Ownership locks prevent
+  concurrent TUI or worker access. Internal engineering execution is not resumed.
+- The TUI generates intent labels in a separate idle model request with no tools.
+  The cache and summary traces are separate from conversation history; failures
+  do not prevent listing or resume.
+
 ### Fixed
 
 - Changing `/effort` now keeps completed conversation history and applies the

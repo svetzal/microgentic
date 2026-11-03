@@ -7,6 +7,7 @@
 - [Install](install.md)
 - [Get started](getting-started.md)
 - [The conversation](conversation.md)
+- [Saved sessions](sessions.md)
 - [Shell use with `run`](shell.md)
 - [Providers and models](providers.md)
 - [Project guidance](guidance.md)

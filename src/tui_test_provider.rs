@@ -38,12 +38,38 @@ impl Gateway {
 impl LlmGateway for Gateway {
     async fn complete(
         &self,
-        _: &str,
-        _: &[LlmMessage],
-        _: Option<&[Box<dyn LlmTool>]>,
-        _: &CompletionConfig,
+        model: &str,
+        messages: &[LlmMessage],
+        tools: Option<&[Box<dyn LlmTool>]>,
+        config: &CompletionConfig,
     ) -> mojentic::Result<LlmGatewayResponse> {
-        Err(error("unexpected non-stream completion"))
+        if !messages
+            .first()
+            .and_then(|m| m.content.as_deref())
+            .is_some_and(|text| text == crate::sessions::INTENT_PROMPT)
+        {
+            return Err(error("unexpected non-stream completion"));
+        }
+        let mut log = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(self.0.join("summary_requests.jsonl"))
+            .map_err(error)?;
+        writeln!(log, "{}", json!({"model":model,"messages":messages,"tools":tools.map(|t| t.len()),"max_tokens":config.max_tokens,"effort":format!("{:?}",config.reasoning_effort)})).map_err(error)?;
+        let metadata: Value =
+            serde_json::from_slice(&std::fs::read(self.0.join("metadata.json")).map_err(error)?)
+                .map_err(error)?;
+        let mut response = LlmGatewayResponse {
+            content: Some(
+                metadata["intent_summary"]
+                    .as_str()
+                    .unwrap_or("Continue the coding task described in this conversation.")
+                    .into(),
+            ),
+            ..Default::default()
+        };
+        response.evidence.finish_reason = Some("stop".into());
+        Ok(response)
     }
     async fn complete_json(
         &self,

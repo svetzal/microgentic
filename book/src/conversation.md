@@ -268,8 +268,9 @@ goes to the input. Set `MICROGENTIC_NO_ANIMATION=1` to turn it off.
 
 ## Conversation history
 
-Each `microgentic` invocation starts a new conversation. Microgentic saves the
+Bare `microgentic` starts a new conversation. Microgentic saves the
 conversation outside the project, in the run-state directory (see
 [Files and locations](locations.md)). When the history becomes larger than half
 of the input allowance, the oldest complete exchanges are left out, and the
-view tells you. Resuming an earlier conversation is not available yet.
+view tells you. Use `microgentic session list` to find a conversation, then
+`microgentic session resume <id>` to reopen it. See [Saved sessions](sessions.md).

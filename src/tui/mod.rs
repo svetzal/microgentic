@@ -315,6 +315,7 @@ fn submit(view: &mut View, session: &mut Session, active: &mut Option<ActiveRun>
 
 /// Start a worker for one message with the session's current settings.
 fn start_reply(view: &mut View, session: &mut Session, prompt: &str) -> Result<Option<ActiveRun>> {
+    session.stop_summary();
     let mut command = tokio::process::Command::new(std::env::current_exe()?);
     // The worker finds the same user-level guidance beside this config file.
     if let Some(config) = &session.config_path {
@@ -324,6 +325,9 @@ fn start_reply(view: &mut View, session: &mut Session, prompt: &str) -> Result<O
         Some(state) => state,
         None => session.state.insert(create_session(&session.root)?),
     };
+    if session.owner.is_none() {
+        session.owner = Some(crate::sessions::Lease::owner(state)?);
+    }
     let settings = &session.settings;
     command
         .args(["conversation-worker", "--prompt", prompt, "--session-state"])
@@ -340,6 +344,9 @@ fn start_reply(view: &mut View, session: &mut Session, prompt: &str) -> Result<O
         .stderr(Stdio::piped());
     if let Some(effort) = &settings.reasoning_effort {
         command.args(["--reasoning-effort", effort]);
+    }
+    if session.preserve_reasoning {
+        command.arg("--preserve-reasoning");
     }
     // The worker reads the same agent file, by the path resolved at start.
     if let Some(agent) = &session.agent {
@@ -504,11 +511,65 @@ pub async fn run(
     config: Option<PathBuf>,
     agent: Option<crate::agent_file::AgentFile>,
 ) -> Result<()> {
-    let path = crate::preferences::config_path(config.as_deref())?;
+    run_session(config, agent, None).await
+}
+
+pub(crate) async fn resume(config: Option<PathBuf>, id: &str, agent: Option<String>) -> Result<()> {
+    let path = crate::sessions::resolve(&crate::preferences::state_root()?, id)?;
+    let owner = crate::sessions::Lease::owner(&path)?;
+    let worker = crate::sessions::Lease::worker(&path)?;
+    let state = crate::conversation::load_saved(&path)?;
+    if !state.root.is_dir() {
+        anyhow::bail!(
+            "saved project {} is unavailable; restore it before resuming",
+            state.root.display()
+        );
+    }
+    let prefs = crate::sessions::preferences(&state)?;
+    let config = config.or(state.config_path.clone());
+    let agent = if let Some(agent) = agent {
+        Some(crate::cli::load_agent(&agent, config.as_deref())?)
+    } else {
+        state
+            .agent_path
+            .as_deref()
+            .map(crate::agent_file::load)
+            .transpose()?
+    };
+    drop(worker);
+    run_session(config, agent, Some((path, state, prefs, owner))).await
+}
+
+async fn run_session(
+    config: Option<PathBuf>,
+    agent: Option<crate::agent_file::AgentFile>,
+    resumed: Option<(
+        PathBuf,
+        crate::conversation::SessionState,
+        crate::preferences::Preferences,
+        crate::sessions::Lease,
+    )>,
+) -> Result<()> {
+    let path = std::env::current_dir()?.join(crate::preferences::config_path(config.as_deref())?);
     let mut session = Session::new(
         std::env::current_dir()?,
-        crate::preferences::load(&path)?.unwrap_or_default(),
+        if resumed.is_some() {
+            Default::default()
+        } else {
+            crate::preferences::load(&path)?.unwrap_or_default()
+        },
     );
+    let mut restored = None;
+    if let Some((path, mut state, prefs, owner)) = resumed {
+        session.root = state.root.clone();
+        session.settings = prefs;
+        session.state = Some(path.clone());
+        session.owner = Some(owner);
+        session.preserve_reasoning = state.preserve_reasoning;
+        state.resume_notice = true;
+        crate::conversation::save_saved(&path, &state)?;
+        restored = Some(state);
+    }
     session.config_path = Some(path.clone());
     // A file too large for the model's known window is refused before the
     // conversation opens; each worker checks again against the window the
@@ -557,16 +618,40 @@ pub async fn run(
         context_panel: Default::default(),
     };
     view.history.reset();
+    let resuming = restored.is_some();
+    if let Some(state) = restored {
+        view.history.restore(&state.messages);
+        view.history.start_block();
+        let id = session
+            .state
+            .as_ref()
+            .and_then(|path| path.parent())
+            .and_then(|path| path.file_name())
+            .unwrap_or_default()
+            .to_string_lossy();
+        view.history.push(
+            Role::System,
+            &format!(
+                "Resumed {id}. Earlier tool results are historical; new work needs fresh checks.\n"
+            ),
+        );
+        if let Some(error) = state.last_error {
+            view.history
+                .push(Role::Error, &format!("Previous request stopped: {error}\n"));
+        }
+        view.status = ready_for_next();
+    }
     let mut active: Option<ActiveRun> = None;
     let mut last_draw = None;
     let spinner_epoch = launch::Clock::start();
     let (columns, lines) = terminal::size()?;
-    let mut launch_started = launch::should_play(
-        std::env::var_os("MICROGENTIC_NO_ANIMATION").as_deref(),
-        std::env::var_os("TERM").as_deref(),
-        columns,
-        lines,
-    )
+    let mut launch_started = (!resuming
+        && launch::should_play(
+            std::env::var_os("MICROGENTIC_NO_ANIMATION").as_deref(),
+            std::env::var_os("TERM").as_deref(),
+            columns,
+            lines,
+        ))
     .then(launch::Clock::start);
     let outcome: Result<()> = async {
         loop {
@@ -612,6 +697,7 @@ pub async fn run(
                 view.history.stop_running();
                 session.refresh_git();
                 session.refresh_guidance();
+                session.refresh_summary();
                 view.scroll = 0;
             }
             if let Some(run) = &active {

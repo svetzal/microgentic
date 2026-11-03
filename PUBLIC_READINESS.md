@@ -231,8 +231,9 @@ budget defaults.
 
 ### 4. Make coding effects reviewable
 
-The TUI streams replies and tool activity, but it has no approval view, final diff,
-or durable resume command. Agent tools still use the existing execution authority.
+The TUI streams replies and tool activity and can reopen saved conversations.
+It has no approval view or final diff. Agent tools still use the existing
+execution authority.
 
 - [ ] Define inspection, approved changes, and autonomous execution consistently
   across CLI and TUI. Include shell, network, and validation effects.
@@ -243,6 +244,11 @@ or durable resume command. Agent tools still use the existing execution authorit
   the shared outcome. Test keyboard behavior, narrow terminals, and cancellation.
 - [ ] Add durable sessions after checkpoint fidelity and ownership are defined.
   Resume must preserve completed work, detect external changes, and avoid tool replay.
+  Progress: conversation listing and resume restore completed messages, tool
+  results, model settings, and agent-file selection. File leases protect TUI and
+  worker ownership. Earlier results are historical and fresh checks are required.
+  Cached model-written intent labels make sessions identifiable without provider
+  calls during listing. Durable engineering execution checkpoints remain.
 
 These are wider usability gates. Defer additional platforms, a daemon, MCP,
 and extensive TUI styling until the everyday workflows above are dependable.
@@ -567,6 +573,9 @@ gateway still needs recovery, reasoning, telemetry, and tool-history conformance
   contract, conversation/context state, pending approvals, mutation epoch,
   probes, and outcome. A trace or final summary alone is not a resume checkpoint.
   Avoid timestamp collisions for concurrent starts.
+  Progress: the TUI can list and reopen saved conversations, preserving settings,
+  completed native history, and agent-file selection. Cached intent labels use
+  separate advisory requests. Engineering execution state is not yet durable.
 - [ ] **Make resume safe.** Detect external file changes, invalidate stale checks,
   and avoid replaying completed tools. Refuse uncertain active-provider ownership.
   Define interruption and process-tree cleanup during planning, tools, checks,
@@ -762,9 +771,10 @@ The behaviors and examples in this section are requirements for implementation.
 
 ### Proposed examples and acceptance checks
 
-The basic entry points, prompt intake, text output, and JSON summaries are
-implemented. `status`, `--stream`, and richer session commands remain proposals;
-those examples are future acceptance targets.
+The basic entry points, prompt intake, text output, JSON summaries, session
+listing, and conversation resume are implemented. `status`, `--stream`, session
+inspection, and engineering execution resume remain proposals; those examples
+are future acceptance targets.
 
 ```sh
 microgentic
@@ -801,8 +811,9 @@ microgentic run --prompt "Summarize the public API" >> summaries.txt
 
 Decision recorded on 2026-10-13: bare `microgentic` opens the TUI, `setup`
 configures provider/default model/effort, and `run` requires stdin or `--prompt`.
-The three entry points are implemented. `--apply` currently saves setup only;
-run preview/apply and additional commands below remain proposals.
+The three entry points, session listing, and conversation resume are implemented.
+`--apply` currently saves setup only; run preview/apply and the other additional
+commands below remain proposals.
 
 | Command | User purpose |
 | --- | --- |
@@ -817,9 +828,9 @@ run preview/apply and additional commands below remain proposals.
 | `microgentic provider edit local --apply` | Apply a reviewed profile change |
 | `microgentic model list --provider local` | Discover models for a profile |
 | `microgentic status --json` | Report session outcome and check state |
-| `microgentic session list` | Find previous work |
+| `microgentic session list` | Find saved conversations using cached intent sentences; implemented |
 | `microgentic session show SESSION_ID` | Inspect conversation, changes, and evidence |
-| `microgentic session resume SESSION_ID` | Reopen work; require approval for further effects |
+| `microgentic session resume SESSION_ID` | Reopen a conversation and wait for input; implemented. Engineering execution and approval restoration remain proposed |
 | `microgentic init --apply` | Install reviewed companion guidance globally |
 | `microgentic init --local --apply` | Install reviewed guidance in this project |
 

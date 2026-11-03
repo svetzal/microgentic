@@ -660,6 +660,179 @@ fn tui_streams_and_keeps_native_history_ollama() {
     conversation(microgentic(), Wire::Ollama);
 }
 
+fn resume_saved_conversation(wire: Wire, interrupted: bool) {
+    let workspace = Workspace::new();
+    workspace.write("memo.txt", "Original workspace observation: copperfern.\n");
+    let agent = workspace.write(
+        "reviewer.md",
+        "---\nname: retained-reviewer\n---\nInspect the project carefully before making changes.\n",
+    );
+    let release = Gate::default();
+    let held = release.clone();
+    let provider = ScriptedGateway::start(wire, move |request| {
+        Reply::Stream(match request.number {
+            1 => vec![tool("read_file", serde_json::json!({"path":"memo.txt"}))],
+            2 => vec![content("I saved the copperfern project decision.")],
+            3 if interrupted => vec![
+                content("PARTIAL-NOT-REPLAYABLE"),
+                Step::Hold(held.clone()),
+                Step::Abort,
+            ],
+            _ => vec![content("RESUMED-WITH-CONTEXT")],
+        })
+    });
+    let mut session = open_session(microgentic(), workspace, provider, 40, 180);
+    // Start with an explicit agent, then prove it survives a separate process.
+    session.tui.quit();
+    session.tui = launch_tui_with(
+        microgentic(),
+        &session.workspace,
+        &session.provider,
+        40,
+        180,
+        &["--agent", agent.to_str().unwrap()],
+    );
+    session.exchange(
+        "Implement the copperfern project. Read memo.txt before continuing.",
+        "I saved the copperfern",
+    );
+    if interrupted {
+        session
+            .tui
+            .submit("Try a request that will be interrupted.");
+        session.tui.wait_text("PARTIAL-NOT-REPLAYABLE");
+        session.tui.ctrl_c();
+        session.tui.wait_text("You can follow up");
+        release.open();
+    }
+    // Persist an effort change even when no further request is sent before quit.
+    session.tui.submit("/effort disabled");
+    session.tui.wait_text("Conversation history kept.");
+    let path = session.workspace.session_file();
+    let id = path
+        .parent()
+        .unwrap()
+        .file_name()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_owned();
+    let saved = session.session_state();
+    assert_eq!(saved["agent_path"], agent.to_str().unwrap());
+    assert_eq!(saved["reasoning_effort"], "disabled");
+    let before_requests = session.provider.request_count();
+    let listing = run_binary(
+        microgentic(),
+        &["session", "list", "--json"],
+        &session.workspace.project,
+        &env_for(&session),
+        b"",
+    );
+    assert!(
+        listing.status.success(),
+        "{}",
+        String::from_utf8_lossy(&listing.stderr)
+    );
+    let rows: serde_json::Value = serde_json::from_slice(&listing.stdout).unwrap();
+    assert_eq!(rows[0]["id"], id);
+    assert_eq!(rows[0]["status"], "active");
+    assert_eq!(
+        session.provider.request_count(),
+        before_requests,
+        "listing invoked the model"
+    );
+
+    let launch_resume = |session: &Session| {
+        let mut launch = Launch::new(microgentic())
+            .arg("--config")
+            .arg(&session.workspace.config)
+            .arg("session")
+            .arg("resume")
+            .arg(&id)
+            .cwd(&session.workspace.base)
+            .size(40, 180);
+        for (key, value) in env_for(session) {
+            launch = launch.env(key, value);
+        }
+        launch.spawn()
+    };
+    let mut competing = launch_resume(&session);
+    assert!(!competing.wait_exit());
+    assert!(String::from_utf8_lossy(&competing.raw()).contains("session is already open"));
+    session.tui.quit();
+    let worker_lease = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path.parent().unwrap().join("worker.lock"))
+        .unwrap();
+    worker_lease.try_lock().unwrap();
+    let mut orphaned = launch_resume(&session);
+    assert!(!orphaned.wait_exit());
+    assert!(String::from_utf8_lossy(&orphaned.raw()).contains("worker is still running"));
+    worker_lease.unlock().unwrap();
+    drop(worker_lease);
+    session.workspace.write(
+        "memo.txt",
+        "Workspace has changed since the saved observation.\n",
+    );
+    session
+        .workspace
+        .configure(wire.name(), "other-model", Some("high"));
+    let mut resumed = launch_resume(&session);
+    let screen = resumed.wait_text(&format!("Resumed {id}"));
+    assert!(screen.contains("I saved the copperfern"), "{screen}");
+    assert!(screen.contains("historical"), "{screen}");
+    assert!(screen.contains("retained-reviewer"), "{screen}");
+    assert_eq!(
+        session.provider.request_count(),
+        before_requests,
+        "resume started coding automatically"
+    );
+    resumed.submit("Continue with the decisions from before quitting.");
+    resumed.wait_for("the resumed reply", |screen| {
+        screen.contains("RESUMED-WITH-CONTEXT") && screen.contains(READY)
+    });
+    let request = session.provider.requests().last().unwrap().clone();
+    assert_eq!(request["model"], "test-model");
+    assert_eq!(request["effort"], "Some(Disabled)");
+    assert!(
+        request["messages"]
+            .to_string()
+            .contains("Original workspace observation: copperfern")
+    );
+    assert!(
+        request["messages"]
+            .to_string()
+            .contains("reopened after quitting")
+    );
+    assert!(
+        request["messages"]
+            .to_string()
+            .contains("obtain fresh validation")
+    );
+    assert!(
+        request["messages"]
+            .to_string()
+            .contains("Inspect the project carefully")
+    );
+    assert!(
+        !request["messages"]
+            .to_string()
+            .contains("PARTIAL-NOT-REPLAYABLE")
+    );
+    assert_eq!(session.workspace.session_files(), 1);
+    resumed.quit();
+}
+
+#[test]
+fn session_resume_restores_completed_conversation_omlx() {
+    resume_saved_conversation(Wire::Omlx, false);
+}
+#[test]
+fn session_resume_restores_interrupted_conversation_ollama() {
+    resume_saved_conversation(Wire::Ollama, true);
+}
+
 #[test]
 fn legacy_tui_streams_and_keeps_native_history_omlx() {
     conversation(legacy_binary(), Wire::Omlx);
