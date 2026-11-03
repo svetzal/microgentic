@@ -6,6 +6,7 @@ pub mod agent_file;
 pub mod baseline;
 pub mod calculator;
 pub mod cli;
+mod completion_failure;
 mod context_snapshot;
 pub mod context_window;
 pub mod contract;

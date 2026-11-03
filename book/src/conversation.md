@@ -217,6 +217,24 @@ with one line that names the outcome, and the status bar says `Stopped`:
 These are the same outcomes that `run` reports in its exit status. See
 [Commands](commands.md#exit-status).
 
+### Output token limit
+
+Reasoning uses the same output allowance as answer text and tool calls. A model
+can spend the entire allowance thinking before it produces an answer.
+
+When the provider reports this limit, Microgentic explains the cause and shows
+the generated token count when available. It identifies reasoning-only output
+separately from a partial answer. Unfinished tool calls are not executed.
+
+Microgentic stops the exchange without automatically retrying or changing your
+settings. Completed conversation history remains available. Ask to continue
+with one smaller step. The follow-up starts a fresh request; it does not resume
+the interrupted stream.
+
+To reduce thinking, try `/effort low` or `/effort disabled`. Support depends on
+the model. Changing effort starts a new conversation, so include the task and
+relevant decisions in your next message.
+
 ## Evidence
 
 When an exchange uses project tools, the reply ends with an `Evidence:` line.

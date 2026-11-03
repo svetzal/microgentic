@@ -53,6 +53,17 @@ These `run` flags control request size:
 For oMLX, set the real context limit on the server. The oMLX gateway does not
 send Ollama-specific settings.
 
+When the provider reports an output limit, Microgentic stops with an explanation
+and reports the generated token count when available. Reasoning can consume the
+whole allowance before any answer or tool call appears. Partial output remains
+incomplete, and unfinished tool calls are not executed.
+
+Try a smaller task, or rerun with a larger `--max-tokens` value. To reduce
+thinking, try `--reasoning-effort low` or `--reasoning-effort disabled`. Support
+depends on the model. Microgentic does not automatically retry the request or
+change these settings. In the conversation, see
+[Output token limit](conversation.md#output-token-limit).
+
 ## Settings file
 
 Setup saves its choices in `$XDG_CONFIG_HOME/microgentic/config.json`, or in

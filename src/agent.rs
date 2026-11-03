@@ -3316,6 +3316,13 @@ async fn stream_response<G: LlmGateway + ?Sized>(
                     }
                 }
                 Err(error) => {
+                    let output_limit = crate::completion_failure::OutputLimit::from_error(
+                        &error,
+                        completion_config.max_tokens,
+                    );
+                    if let Some(limit) = &output_limit {
+                        let _ = trace.event("llm.completion.output_limit", limit);
+                    }
                     let _ = trace.event(
                         "agent.stream.failed",
                         serde_json::json!({
@@ -3326,7 +3333,11 @@ async fn stream_response<G: LlmGateway + ?Sized>(
                             "error": error.to_string(),
                         }),
                     );
-                    return Err(error.into());
+                    let error = anyhow::Error::new(error);
+                    return Err(match output_limit {
+                        Some(limit) => error.context(limit),
+                        None => error,
+                    });
                 }
             }
         }

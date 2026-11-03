@@ -912,9 +912,10 @@ struct SetupArgs {
 
 /// Shared application boundary for the public and compatibility executables.
 ///
-/// An error prints as `Error: {error:?}`, as `anyhow` would print it from
-/// `main`. The public executable's status then follows the run outcome the
-/// error carries (`RunOutcome::exit_code`), or 1 when it carries none; the
+/// An error prints with its actionable diagnosis, or `Error: {error:?}` as
+/// `anyhow` would print it from `main`. The public executable's status follows
+/// the run outcome the error carries (`RunOutcome::exit_code`), or 1 when it
+/// carries none; the
 /// compatibility executable always ends with 1.
 pub async fn main_entry(legacy: bool) -> ExitCode {
     tracing_subscriber::fmt()
@@ -929,7 +930,8 @@ pub async fn main_entry(legacy: bool) -> ExitCode {
         Ok(code) => code,
         Err(error) => {
             // Standard error may be gone; a failed write must not panic here.
-            let _ = writeln!(std::io::stderr().lock(), "Error: {error:?}");
+            let message = crate::completion_failure::message(&error, false);
+            let _ = writeln!(std::io::stderr().lock(), "Error: {message}");
             if legacy {
                 ExitCode::from(1)
             } else {

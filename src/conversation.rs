@@ -586,14 +586,25 @@ pub(crate) async fn run_worker(
     });
     let result: Result<AgentRunSummary> =
         crate::agent::run_agent_in_conversation(config, conversation.clone()).await;
-    let error = result.as_ref().err().map(|e| format!("{e:#}"));
+    let error = result
+        .as_ref()
+        .err()
+        .map(|e| crate::completion_failure::message(e, true));
     // A run that ended without finishing its work leaves the runtime's own
     // account of why for the next request.
-    let continuity_warning = error.clone().or_else(|| {
-        result.as_ref().ok().and_then(|summary| {
-            (!summary.outcome.is_success()).then(|| summary.outcome.to_string())
+    let continuity_warning = result
+        .as_ref()
+        .err()
+        .map(|error| {
+            error
+                .downcast_ref::<crate::completion_failure::OutputLimit>()
+                .map_or_else(|| format!("{error:#}"), ToString::to_string)
         })
-    });
+        .or_else(|| {
+            result.as_ref().ok().and_then(|summary| {
+                (!summary.outcome.is_success()).then(|| summary.outcome.to_string())
+            })
+        });
     let saved = conversation.save(&path, continuity_warning);
     match (&result, &saved) {
         (Ok(summary), Ok(())) => conversation.emit(ConversationEvent::Finished {
