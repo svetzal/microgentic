@@ -697,19 +697,34 @@ impl RecoveryProvider for Gateway {
     }
     fn prepare_recovery(
         &self,
-        _: &str,
+        model: &str,
         _: &[LlmMessage],
         _: Option<&[Box<dyn LlmTool>]>,
         _: &CompletionConfig,
         _: Option<Value>,
         _: bool,
     ) -> mojentic::Result<reqwest::Request> {
+        // Retain a concrete cause through public error APIs, without HTTP.
+        // This supplies caller evidence; it does not verify provider decoding.
+        if model == "fixture-output-limit" {
+            return Err(mojentic::error::MojenticError::IoError(
+                std::io::Error::other(CompletionDecodeError::Length),
+            ));
+        }
         Err(mojentic::error::MojenticError::GatewayError(
             "fixture encoding rejected before transport".into(),
         ))
     }
 }
 fn failure(outcome: Outcome, status: Option<u16>, provider: Provider) -> RecoveryError {
+    failure_fixture(outcome, status, provider, "fixture")
+}
+fn failure_fixture(
+    outcome: Outcome,
+    status: Option<u16>,
+    provider: Provider,
+    model: &str,
+) -> RecoveryError {
     let io = Arc::new(RecoveryIo {
         tool_root: PathBuf::new(),
         turns: Mutex::new(VecDeque::new()),
@@ -721,7 +736,7 @@ fn failure(outcome: Outcome, status: Option<u16>, provider: Provider) -> Recover
         .unwrap();
     let gateway = RecoveryGateway::new(gateway, RecoveryPolicy::default()).unwrap();
     let mut error = futures::executor::block_on(gateway.complete_with_recovery(
-        "fixture",
+        model,
         &[],
         None,
         &CompletionConfig::default(),
@@ -742,6 +757,122 @@ fn failure(outcome: Outcome, status: Option<u16>, provider: Provider) -> Recover
         reason: Reason::Transient,
     };
     error
+}
+
+#[tokio::test]
+async fn public_run_output_limit_explains_reasoning_and_partial_output_without_replay() {
+    for (native, provider) in [
+        (crate::agent::Provider::Ollama, Provider::Ollama),
+        (crate::agent::Provider::Omlx, Provider::Omlx),
+    ] {
+        for (content, tool_fragment, usage) in [(false, false, true), (true, true, false)] {
+            let (dir, io) = workspace();
+            let mut error = failure_fixture(
+                Outcome::Interrupted,
+                Some(200),
+                provider,
+                "fixture-output-limit",
+            );
+            error.failure.category = Category::Protocol;
+            error.failure.classification = Classification {
+                eligible: false,
+                reason: Reason::SemanticOutput,
+            };
+            error.failure.progress.observed.reasoning_bytes = 60_000;
+            error.failure.progress.observed.content_bytes = if content { 20 } else { 0 };
+            error.failure.progress.observed.tool_fragments = u64::from(tool_fragment);
+            if usage {
+                error.stream_metrics = Some(Box::new(mojentic::llm::gateway::StreamMetrics {
+                    eval_count: Some(16_384),
+                    ..Default::default()
+                }));
+            }
+            let mut output = vec![RecoveryStreamEvent::Reasoning(
+                "private unfinished reasoning".into(),
+            )];
+            if content {
+                output.push(RecoveryStreamEvent::Content("unfinished answer".into()));
+            }
+            if tool_fragment {
+                output.push(RecoveryStreamEvent::ToolFragment(
+                    json!({"index":0,"function":{"name":"shell_command","arguments":"{\"command\":\"printf executed >> marker.txt\"}"}}),
+                ));
+            }
+            output.push(RecoveryStreamEvent::Failed(error));
+            io.turns.lock().unwrap().push_back(Script::turn(output));
+            let mut config = config(&io.tool_root);
+            config.provider = native;
+            config.max_thinking_only_tokens = 0;
+            config.max_tokens = Some(16_384);
+            let error = ACTIVE
+                .scope(io.clone(), run_agent(config))
+                .await
+                .unwrap_err();
+            let limit = error
+                .downcast_ref::<crate::completion_failure::OutputLimit>()
+                .expect("lost output limit diagnosis");
+            assert_eq!(limit.generated_tokens, usage.then_some(16_384));
+            assert_eq!(limit.configured_max_tokens, Some(16_384));
+            let message = crate::completion_failure::message(&error, true);
+            assert!(message.contains("output token limit"), "{message}");
+            assert_eq!(
+                message.contains("All observed output was reasoning"),
+                !content
+            );
+            assert_eq!(message.contains("Any partial reply is incomplete"), content);
+            assert!(message.contains("/effort low"));
+            assert!(message.contains("starts a new conversation"));
+            assert!(message.contains("not retried automatically"));
+            assert!(!message.contains("SemanticOutput"));
+            assert!(!message.contains("private unfinished reasoning"));
+            let shell = crate::completion_failure::message(&error, false);
+            assert!(shell.contains("--max-tokens"));
+            assert!(!shell.contains("/effort"));
+            // The original structured recovery failure remains available.
+            assert!(
+                error
+                    .downcast_ref::<mojentic::error::MojenticError>()
+                    .is_some()
+            );
+            let trace = events(dir.path());
+            let diagnosed = payloads(&trace, "llm.completion.output_limit");
+            assert_eq!(diagnosed.len(), 1);
+            assert_eq!(diagnosed[0]["reasoning_bytes"], 60_000);
+            assert_eq!(diagnosed[0]["content_bytes"], if content { 20 } else { 0 });
+            assert_eq!(diagnosed[0]["completed_tool_calls"], 0);
+            assert_eq!(
+                io.requests.lock().unwrap().len(),
+                1,
+                "must not retry a truncated request"
+            );
+            assert!(!io.tool_root.join("marker.txt").exists());
+        }
+    }
+}
+
+#[test]
+fn output_limit_requires_typed_cause_and_never_overrides_cancellation() {
+    let mut error = failure(Outcome::Interrupted, Some(200), Provider::Ollama);
+    error.failure.category = Category::Protocol;
+    error.failure.classification.reason = Reason::SemanticOutput;
+    error.stream_metrics = Some(Box::new(mojentic::llm::gateway::StreamMetrics {
+        eval_count: Some(16_384),
+        ..Default::default()
+    }));
+    let error = mojentic::error::MojenticError::Recovery(Box::new(error));
+    assert!(crate::completion_failure::OutputLimit::from_error(&error, Some(16_384)).is_none());
+    let error = mojentic::error::MojenticError::GatewayError(
+        "completion reached its output length limit".into(),
+    );
+    assert!(crate::completion_failure::OutputLimit::from_error(&error, None).is_none());
+    let error = failure_fixture(
+        Outcome::Cancelled,
+        Some(200),
+        Provider::Ollama,
+        "fixture-output-limit",
+    );
+    let error = mojentic::error::MojenticError::Recovery(Box::new(error));
+    assert!(crate::completion_failure::OutputLimit::from_error(&error, Some(16_384)).is_none());
 }
 fn expected_failure(provider: &str, status: Option<u16>) -> Value {
     json!({"provider":provider,"operation":"streaming","category":"http","http_status":status,

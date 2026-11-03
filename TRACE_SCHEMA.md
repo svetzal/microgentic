@@ -326,6 +326,15 @@ its analyzer classification.
 
 ## Request recovery lifecycle
 
+`llm.completion.output_limit` records a provider-confirmed output limit detected
+from Mojentic's typed `CompletionDecodeError::Length` cause. It adds an
+actionable diagnosis without changing the recovery outcome or stop policy.
+Its fields are `generated_tokens` (nullable, from terminal metrics),
+`configured_max_tokens` (nullable), and observed `reasoning_bytes`,
+`content_bytes`, `tool_fragments`, and `completed_tool_calls`. Byte counts are
+not token estimates. This event contains no raw provider payload or reasoning.
+The original `agent.stream.failed` and recovery failure events remain available.
+
 `llm.recovery.lifecycle` stores Mojentic's typed transition, identity
 (`logical_request_id`, `attempt_id`, `wire_attempt`), phase, progress, safe failure
 and optional delay. Progress separates headers/raw bytes from observed and

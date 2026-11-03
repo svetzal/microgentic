@@ -10,6 +10,14 @@ The release workflow publishes each version's section as its GitHub release note
 
 ## [Unreleased]
 
+### Fixed
+
+- Output-limit failures now explain when a model exhausted its token allowance,
+  including reasoning-only output, and give recovery steps for the conversation
+  and CLI. Traces retain the typed recovery failure and add output-limit counts.
+  Interrupted requests are not automatically retried, and unfinished tool calls
+  remain unexecuted.
+
 ## [0.7.0] - 2026-10-31
 
 Everyday `run` now hands engineering work to an engineering subagent through
