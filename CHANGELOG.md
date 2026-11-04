@@ -10,13 +10,14 @@ The release workflow publishes each version's section as its GitHub release note
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-03
+
 ### Added
 
 - Configurable output token limits for new TUI conversations and session resume
   through `--max-tokens`. `setup --max-tokens N --apply` saves a default for new
   conversations and everyday runs. Resumed sessions preserve their saved limit;
   explicit overrides keep conversation history. Benchmark defaults are unchanged.
-
 - `session list` finds saved conversations by project, with `--all` and `--json`
   options. Each entry shows a cached model-written intent sentence or its first
   user message, plus activity, state, project, model, and session ID.
@@ -407,7 +408,8 @@ experimental harness into a small terminal interface for everyday use.
 - A successful process exit still needs inspection of the native terminal
   result when classifying benchmark outcomes.
 
-[Unreleased]: https://github.com/svetzal/microgentic/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/svetzal/microgentic/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/svetzal/microgentic/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/svetzal/microgentic/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/svetzal/microgentic/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/svetzal/microgentic/compare/v0.4.0...v0.5.0
