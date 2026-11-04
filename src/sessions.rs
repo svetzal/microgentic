@@ -104,6 +104,7 @@ pub(crate) fn preferences(state: &SessionState) -> Result<Preferences> {
             .map(|effort| format!("{effort:?}").to_lowercase()),
         standing_context_limit: state.standing_context_limit,
         guidance_fraction: state.guidance_fraction,
+        max_tokens: state.max_tokens,
         ..Default::default()
     };
     prefs.validate()?;

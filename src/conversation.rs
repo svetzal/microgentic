@@ -78,6 +78,8 @@ pub(crate) struct SessionState {
     pub(crate) provider: Provider,
     pub(crate) model: String,
     pub(crate) reasoning_effort: Option<ReasoningEffort>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) max_tokens: Option<usize>,
     pub(crate) preserve_reasoning: bool,
     pub(crate) messages: Vec<LlmMessage>,
     pub(crate) last_error: Option<String>,
@@ -215,6 +217,7 @@ impl ConversationRun {
                 provider: config.provider,
                 model: config.model.clone(),
                 reasoning_effort: config.reasoning_effort,
+                max_tokens: config.max_tokens,
                 preserve_reasoning: config.preserve_reasoning,
                 messages: Vec::new(),
                 last_error: None,
@@ -242,17 +245,32 @@ impl ConversationRun {
         // Effort is a request control, not conversation identity. Retain the
         // completed native history and record the setting used for this request.
         state.reasoning_effort = config.reasoning_effort;
+        state.max_tokens = Some(
+            config
+                .max_tokens
+                .unwrap_or(crate::agent::DEFAULT_MAX_TOKENS),
+        );
         state.agent_path = config.agent.as_ref().map(|agent| agent.path.clone());
         state.standing_context_limit = config.standing_context_limit;
         state.guidance_fraction = config.guidance_fraction;
         // Reserve half the input allowance for the new task, tools and repairs.
         // Remove complete oldest exchanges only; never split a tool-call batch.
-        let allowance = config
-            .context_window_tokens
-            .unwrap_or(32768)
-            .saturating_sub(config.max_tokens.unwrap_or(16384))
-            .saturating_mul(4)
-            / 2;
+        let output_limit = config
+            .max_tokens
+            .unwrap_or(crate::agent::DEFAULT_MAX_TOKENS);
+        let input_allowance = match config.context_window_tokens {
+            Some(window) if output_limit >= window => {
+                bail!(
+                    "output token limit {output_limit} leaves no input space in the configured context window of {window} tokens; resume with a smaller --max-tokens value"
+                );
+            }
+            Some(window) => window - output_limit,
+            // The fallback is a history budget, not evidence of the provider's
+            // context size. Preserve its ordinary input allowance when the
+            // requested output limit exceeds that unverified estimate.
+            None => 32768usize.saturating_sub(output_limit).max(16384),
+        };
+        let allowance = input_allowance.saturating_mul(4) / 2;
         let omitted_exchanges = trim_history(&mut state.messages, allowance);
         let protected_users = state
             .messages
@@ -773,6 +791,7 @@ mod tests {
                 provider: Provider::Omlx,
                 model: "test".into(),
                 reasoning_effort: None,
+                max_tokens: None,
                 preserve_reasoning: true,
                 messages: history,
                 last_error: None,

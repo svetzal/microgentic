@@ -10,6 +10,33 @@ fn run_json(provider: &ScriptedGateway, workspace: &Workspace, args: &[&str]) ->
     summary(&output)
 }
 
+#[test]
+fn output_limit_uses_saved_default_with_explicit_override_both_providers() {
+    for wire in [Wire::Omlx, Wire::Ollama] {
+        let workspace = Workspace::new();
+        workspace.configure(wire.name(), "test-model", None);
+        let mut prefs: Value =
+            serde_json::from_slice(&std::fs::read(&workspace.config).unwrap()).unwrap();
+        prefs["max_tokens"] = json!(32768);
+        std::fs::write(&workspace.config, prefs.to_string()).unwrap();
+        for explicit in [None, Some("8192")] {
+            let provider = ScriptedGateway::replying(wire, vec![content("Ready.")]);
+            let mut args = vec!["run", "--prompt", "Hello.", "--json"];
+            if let Some(limit) = explicit {
+                args.extend(["--max-tokens", limit]);
+            }
+            let summary = run_json(&provider, &workspace, &args);
+            let expected = if explicit.is_some() { 8192 } else { 32768 };
+            assert_eq!(summary["max_tokens"], expected);
+            assert!(
+                provider.requests()[0]["completion"]
+                    .to_string()
+                    .contains(&format!("Some({expected})"))
+            );
+        }
+    }
+}
+
 fn metadata(tokens: usize, field: &str, num_ctx: Option<usize>) -> ModelContextWindow {
     ModelContextWindow {
         max_context_tokens: tokens.try_into().unwrap(),

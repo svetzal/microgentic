@@ -9,8 +9,12 @@ microgentic session resume session-AbCd12
 
 Use an ID from the list. Resume opens the saved project and waits for your next
 message. It restores completed messages, tool results, model, reasoning effort,
-and the agent-file selection. It does not run tools or continue a stopped
-generation automatically.
+output token limit, and the agent-file selection. It does not run tools or
+continue a stopped generation automatically.
+
+To change the output limit while keeping the conversation, use
+`microgentic session resume SESSION_ID --max-tokens 32768`. The new limit is
+retained for later resumes, even if you quit before sending another message.
 
 ## Find a conversation
 

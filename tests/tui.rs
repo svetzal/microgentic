@@ -690,7 +690,12 @@ fn resume_saved_conversation(wire: Wire, interrupted: bool) {
         &session.provider,
         40,
         180,
-        &["--agent", agent.to_str().unwrap()],
+        &[
+            "--agent",
+            agent.to_str().unwrap(),
+            "--max-tokens",
+            if interrupted { "16384" } else { "32768" },
+        ],
     );
     session.exchange(
         "Implement the copperfern project. Read memo.txt before continuing.",
@@ -751,6 +756,9 @@ fn resume_saved_conversation(wire: Wire, interrupted: bool) {
             .arg(&id)
             .cwd(&session.workspace.base)
             .size(40, 180);
+        if interrupted {
+            launch = launch.arg("--max-tokens").arg("32768");
+        }
         for (key, value) in env_for(session) {
             launch = launch.env(key, value);
         }
@@ -795,6 +803,8 @@ fn resume_saved_conversation(wire: Wire, interrupted: bool) {
     let request = session.provider.requests().last().unwrap().clone();
     assert_eq!(request["model"], "test-model");
     assert_eq!(request["effort"], "Some(Disabled)");
+    assert_eq!(request["max_tokens"], 32768);
+    assert_eq!(session.session_state()["max_tokens"], 32768);
     assert!(
         request["messages"]
             .to_string()

@@ -46,6 +46,14 @@ fn parse_guidance_fraction(value: &str) -> Result<f64, String> {
     parse_fraction("--guidance-fraction", value)
 }
 
+fn parse_token_limit(value: &str) -> Result<usize, String> {
+    value
+        .parse::<usize>()
+        .ok()
+        .filter(|n| *n > 0)
+        .ok_or_else(|| "token limit must be a positive integer".into())
+}
+
 pub(crate) fn parse_reasoning_effort(
     value: &str,
 ) -> Result<mojentic::llm::gateway::ReasoningEffort, String> {
@@ -80,6 +88,9 @@ struct Cli {
     /// file and then in `~/.claude/agents/`, or a path to a Markdown file.
     #[arg(long, value_name = "NAME|PATH")]
     agent: Option<String>,
+    /// Maximum generated tokens per conversation request, including reasoning (default: 16384).
+    #[arg(long, value_parser = parse_token_limit)]
+    max_tokens: Option<usize>,
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -859,6 +870,9 @@ enum SessionCommand {
         /// Override the saved agent file, or supply one for an older session.
         #[arg(long)]
         agent: Option<String>,
+        /// Override the saved output token limit, keeping conversation history.
+        #[arg(long, value_parser = parse_token_limit)]
+        max_tokens: Option<usize>,
     },
 }
 
@@ -934,6 +948,9 @@ struct SetupArgs {
     /// Use default to preserve the model/provider default.
     #[arg(long, value_parser = ["default", "disabled", "enabled", "low", "medium", "high", "xhigh"])]
     reasoning_effort: Option<String>,
+    /// Default output limit, including reasoning (default: 16384).
+    #[arg(long, value_parser = parse_token_limit)]
+    max_tokens: Option<usize>,
     /// Save the reviewed configuration. Without this flag setup only previews.
     #[arg(long)]
     apply: bool,
@@ -1003,12 +1020,17 @@ async fn dispatch_cli(
         if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
             bail!("interactive mode needs a terminal; try: echo 'Hello!' | microgentic run");
         }
-        crate::tui::run(cli.config, agent).await?;
+        crate::tui::run(cli.config, agent, cli.max_tokens).await?;
         return Ok(ExitCode::SUCCESS);
     };
     if cli.agent.is_some() {
         return Err(usage_error(
             "--agent before a command applies only to the conversation; give it after the command, as in microgentic run --agent <name|path>",
+        ));
+    }
+    if cli.max_tokens.is_some() {
+        return Err(usage_error(
+            "--max-tokens before a command applies to a new conversation; give it after run, setup, or session resume to configure that command",
         ));
     }
     match command {
@@ -1049,13 +1071,17 @@ async fn dispatch_cli(
                     writeln!(stdout, "Resume with: microgentic session resume SESSION_ID")?;
                 }
             }
-            SessionCommand::Resume { id, agent } => {
+            SessionCommand::Resume {
+                id,
+                agent,
+                max_tokens,
+            } => {
                 if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
                     bail!(
                         "session resume needs a terminal; use microgentic session list --json to inspect saved sessions"
                     );
                 }
-                crate::tui::resume(cli.config, &id, agent).await?;
+                crate::tui::resume(cli.config, &id, agent, max_tokens).await?;
             }
         },
         Command::Setup(args) => setup(args, cli.config.as_deref())?,
@@ -1470,6 +1496,7 @@ fn prepare_run_with_mode(
             run.standing_context_limit =
                 run.standing_context_limit.or(prefs.standing_context_limit);
             run.guidance_fraction = run.guidance_fraction.or(prefs.guidance_fraction);
+            run.max_tokens = run.max_tokens.or(prefs.max_tokens);
             let provider = run.provider.unwrap_or(prefs.provider);
             if run.model.is_none() && provider == prefs.provider {
                 run.model = Some(prefs.model);
@@ -1611,7 +1638,10 @@ fn setup(args: SetupArgs, explicit_path: Option<&Path>) -> Result<()> {
     let path = crate::preferences::config_path(explicit_path)?;
     let before = crate::preferences::load(&path)?;
     let mut prefs = before.clone().unwrap_or_default();
-    let wizard = args.provider.is_none() && args.model.is_none() && args.reasoning_effort.is_none();
+    let wizard = args.provider.is_none()
+        && args.model.is_none()
+        && args.reasoning_effort.is_none()
+        && args.max_tokens.is_none();
     if wizard && (!std::io::stdin().is_terminal() || !std::io::stdout().is_terminal()) {
         bail!(
             "setup needs settings or a terminal; try microgentic setup --provider ollama --model qwen3.8:27b-mxfp8 --reasoning-effort default --apply"
@@ -1647,6 +1677,9 @@ fn setup(args: SetupArgs, explicit_path: Option<&Path>) -> Result<()> {
     };
     if let Some(effort) = effort {
         prefs.reasoning_effort = (effort != "default").then_some(effort);
+    }
+    if let Some(limit) = args.max_tokens {
+        prefs.max_tokens = Some(limit);
     }
     prefs.validate()?;
     if args.apply {
@@ -1691,13 +1724,26 @@ fn setup(args: SetupArgs, explicit_path: Option<&Path>) -> Result<()> {
                 .unwrap_or("model default"),
             prefs.reasoning_effort.as_deref().unwrap_or("model default")
         );
+        println!(
+            "Output token limit: {} → {} (including reasoning)",
+            before
+                .as_ref()
+                .and_then(|p| p.max_tokens)
+                .unwrap_or(crate::agent::DEFAULT_MAX_TOKENS),
+            prefs.max_tokens.unwrap_or(crate::agent::DEFAULT_MAX_TOKENS)
+        );
         if !args.apply {
+            let token_flag = prefs
+                .max_tokens
+                .map(|n| format!(" --max-tokens {n}"))
+                .unwrap_or_default();
             println!(
-                "Save these settings with:\n  microgentic --config {} setup --provider {} --model {} --reasoning-effort {} --apply",
+                "Save these settings with:\n  microgentic --config {} setup --provider {} --model {} --reasoning-effort {}{} --apply",
                 shell_quote(&path.to_string_lossy()),
                 prefs.provider.as_str(),
                 shell_quote(&prefs.model),
-                prefs.reasoning_effort.as_deref().unwrap_or("default")
+                prefs.reasoning_effort.as_deref().unwrap_or("default"),
+                token_flag
             );
         }
     }

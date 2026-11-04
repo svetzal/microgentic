@@ -50,6 +50,25 @@ These `run` flags control request size:
 | `--max-tokens` | 16384 | Maximum generated tokens per request, including reasoning |
 | `--context-window-tokens` | 262144 for the default oMLX model | Context window for Microgentic's accounting; Ollama also receives it as `num_ctx` |
 
+The output limit is also available for new conversations and resumed sessions:
+
+```sh
+microgentic --max-tokens 32768
+microgentic session resume SESSION_ID --max-tokens 32768
+microgentic run --max-tokens 32768 --prompt 'Continue the implementation'
+```
+
+To make 32K the default for new conversations and everyday runs, use:
+
+```sh
+microgentic setup --max-tokens 32768 --apply
+```
+
+This saves `max_tokens` in the settings file. Explicit flags override it.
+Resumed sessions retain their saved limit unless you provide an override.
+The limit includes reasoning, answer text, and tool calls; increasing it can
+allow a longer reasoning pass. Benchmark mode ignores personal defaults.
+
 For oMLX, set the real context limit on the server. The oMLX gateway does not
 send Ollama-specific settings.
 
