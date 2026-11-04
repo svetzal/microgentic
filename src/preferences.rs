@@ -13,6 +13,9 @@ pub struct Preferences {
     pub model: String,
     /// None preserves the provider's model default, rather than inventing effort.
     pub reasoning_effort: Option<String>,
+    /// Maximum generated tokens per request, including reasoning.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<usize>,
     /// Advanced: all standing context as a fraction of the window, recorded
     /// against in traces. Default 0.15.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -30,6 +33,7 @@ impl Default for Preferences {
             provider: Provider::default(),
             model: Provider::default().default_model().into(),
             reasoning_effort: None,
+            max_tokens: None,
             standing_context_limit: None,
             guidance_fraction: None,
         }
@@ -49,6 +53,9 @@ impl Preferences {
         }
         if let Some(value) = &self.reasoning_effort {
             crate::cli::parse_reasoning_effort(value).map_err(anyhow::Error::msg)?;
+        }
+        if self.max_tokens == Some(0) {
+            bail!("max_tokens must be greater than zero");
         }
         for (key, value) in [
             ("standing_context_limit", self.standing_context_limit),

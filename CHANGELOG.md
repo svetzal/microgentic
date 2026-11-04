@@ -12,6 +12,11 @@ The release workflow publishes each version's section as its GitHub release note
 
 ### Added
 
+- Configurable output token limits for new TUI conversations and session resume
+  through `--max-tokens`. `setup --max-tokens N --apply` saves a default for new
+  conversations and everyday runs. Resumed sessions preserve their saved limit;
+  explicit overrides keep conversation history. Benchmark defaults are unchanged.
+
 - `session list` finds saved conversations by project, with `--all` and `--json`
   options. Each entry shows a cached model-written intent sentence or its first
   user message, plus activity, state, project, model, and session ID.

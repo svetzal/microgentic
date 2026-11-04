@@ -345,6 +345,9 @@ fn start_reply(view: &mut View, session: &mut Session, prompt: &str) -> Result<O
     if let Some(effort) = &settings.reasoning_effort {
         command.args(["--reasoning-effort", effort]);
     }
+    if let Some(limit) = settings.max_tokens {
+        command.arg("--max-tokens").arg(limit.to_string());
+    }
     if session.preserve_reasoning {
         command.arg("--preserve-reasoning");
     }
@@ -510,11 +513,17 @@ fn draw(
 pub async fn run(
     config: Option<PathBuf>,
     agent: Option<crate::agent_file::AgentFile>,
+    max_tokens: Option<usize>,
 ) -> Result<()> {
-    run_session(config, agent, None).await
+    run_session(config, agent, None, max_tokens).await
 }
 
-pub(crate) async fn resume(config: Option<PathBuf>, id: &str, agent: Option<String>) -> Result<()> {
+pub(crate) async fn resume(
+    config: Option<PathBuf>,
+    id: &str,
+    agent: Option<String>,
+    max_tokens: Option<usize>,
+) -> Result<()> {
     let path = crate::sessions::resolve(&crate::preferences::state_root()?, id)?;
     let owner = crate::sessions::Lease::owner(&path)?;
     let worker = crate::sessions::Lease::worker(&path)?;
@@ -537,7 +546,7 @@ pub(crate) async fn resume(config: Option<PathBuf>, id: &str, agent: Option<Stri
             .transpose()?
     };
     drop(worker);
-    run_session(config, agent, Some((path, state, prefs, owner))).await
+    run_session(config, agent, Some((path, state, prefs, owner)), max_tokens).await
 }
 
 async fn run_session(
@@ -549,6 +558,7 @@ async fn run_session(
         crate::preferences::Preferences,
         crate::sessions::Lease,
     )>,
+    max_tokens: Option<usize>,
 ) -> Result<()> {
     let path = std::env::current_dir()?.join(crate::preferences::config_path(config.as_deref())?);
     let mut session = Session::new(
@@ -569,6 +579,16 @@ async fn run_session(
         state.resume_notice = true;
         crate::conversation::save_saved(&path, &state)?;
         restored = Some(state);
+    }
+    if let Some(limit) = max_tokens {
+        session.settings.max_tokens = Some(limit);
+        if let Some(state) = &mut restored {
+            state.max_tokens = Some(limit);
+            crate::conversation::save_saved(
+                session.state.as_ref().context("resumed session path")?,
+                state,
+            )?;
+        }
     }
     session.config_path = Some(path.clone());
     // A file too large for the model's known window is refused before the
