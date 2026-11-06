@@ -765,8 +765,8 @@ fn resume_saved_conversation(wire: Wire, interrupted: bool) {
         launch.spawn()
     };
     let mut competing = launch_resume(&session);
+    competing.wait_text("session is already open");
     assert!(!competing.wait_exit());
-    assert!(String::from_utf8_lossy(&competing.raw()).contains("session is already open"));
     session.tui.quit();
     let worker_lease = std::fs::OpenOptions::new()
         .read(true)
@@ -775,8 +775,8 @@ fn resume_saved_conversation(wire: Wire, interrupted: bool) {
         .unwrap();
     worker_lease.try_lock().unwrap();
     let mut orphaned = launch_resume(&session);
+    orphaned.wait_text("worker is still running");
     assert!(!orphaned.wait_exit());
-    assert!(String::from_utf8_lossy(&orphaned.raw()).contains("worker is still running"));
     worker_lease.unlock().unwrap();
     drop(worker_lease);
     session.workspace.write(
