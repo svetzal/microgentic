@@ -448,6 +448,7 @@ mod tests {
         let mut view = View {
             history: History::default(),
             input: String::new(),
+            shell_mode: false,
             scroll: 3,
             status: Status::new(Phase::Ready, "Ready"),
             panel: None,

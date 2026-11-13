@@ -2139,3 +2139,32 @@ fn tui_ends_on_sigterm_while_a_reply_streams() {
         hold.open();
     }
 }
+
+#[test]
+fn tui_shell_mode_runs_commands_and_returns_to_agent_entry() {
+    let (workspace, provider, mut tui) = open_idle(None);
+    tui.wait_text("Enter send");
+    tui.send(b"!");
+    tui.wait_text("Shell command | Enter run | Ctrl-C return to agent");
+    tui.send(b"touch cancelled-draft");
+    tui.ctrl_c();
+    tui.wait_text("Enter send");
+    assert!(!workspace.project.join("cancelled-draft").exists());
+    tui.send(b"!");
+    tui.wait_text("Shell command | Enter run");
+    tui.send(
+        b"printf 'shell-output'; printf 'shell-error' >&2; printf done > shell-result; exit 7\r",
+    );
+    let screen = tui.wait_text("Shell command: exit status: 7");
+    assert!(screen.contains("shell-output"));
+    assert!(screen.contains("shell-error"));
+    assert!(screen.contains("Enter send"));
+    assert_eq!(workspace.read("shell-result"), "done");
+    tui.paste("! printf 'pasted-shell'");
+    tui.wait_text("Shell command | Enter run");
+    tui.send(b"\r");
+    tui.wait_text("Shell command: exit status: 0");
+    assert!(provider.requests().is_empty());
+    assert!(provider.metadata().is_empty());
+    tui.quit();
+}

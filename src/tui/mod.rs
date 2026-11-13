@@ -7,6 +7,7 @@ mod input;
 mod launch;
 mod picker;
 mod session;
+mod shell;
 mod status_bar;
 mod styled;
 mod thinking;
@@ -133,6 +134,7 @@ impl Status {
 struct View {
     history: History,
     input: String,
+    shell_mode: bool,
     scroll: usize,
     status: Status,
     /// A loading notice or picker above the input. While open, it owns the
@@ -201,6 +203,12 @@ fn handle_panel_key(view: &mut View, session: &mut Session, key: event::KeyEvent
 /// The bottom line: the open panel's keys, or command hints and key help.
 /// When the context panel is open but does not fit, the line says so.
 fn hints(view: &View, split: Option<Split>) -> Styled {
+    if view.shell_mode {
+        return Styled::default().with(
+            Role::Muted,
+            "Shell command | Enter run | Ctrl-C return to agent",
+        );
+    }
     match &view.panel {
         Some(Panel::Loading(_)) => Styled::default().with(Role::Muted, "Esc cancel"),
         Some(Panel::Choose(_)) => Styled::default().with(
@@ -418,7 +426,7 @@ fn compose(view: &View, session: &Session, frame: usize, columns: u16, lines: u1
         }
     }
     let input = Styled::default()
-        .with(Role::Prompt, "> ")
+        .with(Role::Prompt, if view.shell_mode { "! " } else { "> " })
         .with(Role::Plain, &view.input);
     let input_rows = wrap_chars(&input, width);
     let input_height = input_rows.len().min(4) as u16;
@@ -629,6 +637,7 @@ async fn run_session(
     let mut view = View {
         history: History::default(),
         input: String::new(),
+        shell_mode: false,
         scroll: 0,
         status: Status::new(Phase::Ready, "Ready"),
         panel: None,
@@ -662,6 +671,7 @@ async fn run_session(
         view.status = ready_for_next();
     }
     let mut active: Option<ActiveRun> = None;
+    let mut shell_run = None;
     let mut last_draw = None;
     let spinner_epoch = launch::Clock::start();
     let (columns, lines) = terminal::size()?;
@@ -676,6 +686,9 @@ async fn run_session(
     let outcome: Result<()> = async {
         loop {
             if leaving.load(Ordering::Relaxed) {
+                if let Some(run) = &shell_run {
+                    shell::ShellRun::cancel(run);
+                }
                 if let Some(run) = &mut active {
                     if !run.cancelled {
                         interrupt(run);
@@ -734,6 +747,9 @@ async fn run_session(
                     ),
                 );
             }
+            if shell_run.as_ref().is_some_and(|run| run.result.is_finished()) {
+                shell::finish(&mut view, &mut shell_run, &mut session).await;
+            }
             finish_model_listing(&mut view, &mut session).await;
             session.finish_git_refresh().await;
             session.finish_guidance_refresh().await;
@@ -766,7 +782,7 @@ async fn run_session(
                     view.context,
                 ),
                 view.history.revision,
-                view.input.clone(),
+                (view.input.clone(), view.shell_mode),
                 view.scroll,
                 view.status.clone(),
                 view.panel.clone(),
@@ -785,7 +801,7 @@ async fn run_session(
             // turns; an idle screen needs only its signal flag checked.
             let wait = if launch.is_some() {
                 LAUNCH_FRAME
-            } else if active.is_some() || animating {
+            } else if active.is_some() || shell_run.is_some() || animating {
                 BUSY_WAIT
             } else {
                 IDLE_WAIT
@@ -811,18 +827,25 @@ async fn run_session(
             launch_started = None;
             let size = terminal::size()?;
             match event {
-                Event::Paste(text) => view
-                    .input
-                    .extend(text.chars().filter(|ch| !ch.is_control() || *ch == '\n')),
+                Event::Paste(text) => {
+                    let text = if view.input.is_empty() && !view.shell_mode && text.starts_with('!') {
+                        view.shell_mode = true;
+                        &text[1..]
+                    } else { &text };
+                    view.input.extend(text.chars().filter(|ch| !ch.is_control() || *ch == '\n'));
+                }
                 Event::Key(key)
                     if key.kind == KeyEventKind::Press
                         && handle_context_key(&mut view, key, size) => {}
                 Event::Key(key)
                     if key.kind == KeyEventKind::Press
                         && handle_panel_key(&mut view, &mut session, key) => {}
+                Event::Key(key)
+                    if key.kind == KeyEventKind::Press
+                        && shell::key(&mut view, &session.root, &mut shell_run, key, active.is_some()) => {}
                 Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
                     KeyCode::Esc => {
-                        if active.is_none() {
+                        if active.is_none() && shell_run.is_none() {
                             break;
                         }
                     }
@@ -1108,6 +1131,7 @@ mod tests {
         let mut view = View {
             history: History::default(),
             input: String::new(),
+            shell_mode: false,
             scroll: 3,
             status: Status::new(Phase::Ready, "Ready"),
             panel: None,
@@ -1127,6 +1151,236 @@ mod tests {
             .iter()
             .map(|(_, text)| text.as_str())
             .collect()
+    }
+
+    #[test]
+    fn shell_mode_changes_prompt_and_ctrl_c_returns_to_agent_even_when_empty() {
+        let mut view = view();
+        let session = session();
+        let mut run = None;
+        for draft in ["", "touch should-not-run"] {
+            assert!(shell::key(
+                &mut view,
+                &session.root,
+                &mut run,
+                event::KeyEvent::new(KeyCode::Char('!'), KeyModifiers::SHIFT),
+                false
+            ));
+            view.input = draft.into();
+            let scene = compose(&view, &session, 0, 100, 24);
+            assert!(scene.rest.find("! ").is_some());
+            assert!(
+                hints(&view, None)
+                    .runs
+                    .iter()
+                    .any(|(_, text)| text.contains("Enter run"))
+            );
+            assert!(shell::key(
+                &mut view,
+                &session.root,
+                &mut run,
+                event::KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+                false
+            ));
+            assert!(!view.shell_mode);
+            assert!(view.input.is_empty());
+            assert!(run.is_none());
+        }
+        view.input = "Tell me!".into();
+        assert!(!shell::key(
+            &mut view,
+            &session.root,
+            &mut run,
+            key(KeyCode::Char('!')),
+            false
+        ));
+        assert!(!view.shell_mode);
+    }
+
+    #[test]
+    fn shell_draft_waits_for_agent_reply_and_slash_commands_stay_shell_text() {
+        let mut view = view();
+        let session = session();
+        let mut run = None;
+        shell::key(
+            &mut view,
+            &session.root,
+            &mut run,
+            key(KeyCode::Char('!')),
+            true,
+        );
+        view.input = "/bin/echo hello".into();
+        assert!(shell::key(
+            &mut view,
+            &session.root,
+            &mut run,
+            key(KeyCode::Tab),
+            true
+        ));
+        assert!(shell::key(
+            &mut view,
+            &session.root,
+            &mut run,
+            key(KeyCode::Enter),
+            true
+        ));
+        assert_eq!(view.input, "/bin/echo hello");
+        assert!(view.shell_mode);
+        assert!(run.is_none());
+    }
+
+    #[tokio::test]
+    async fn shell_start_failure_returns_to_agent_with_a_visible_error() {
+        let mut view = view();
+        let workspace = tempfile::tempdir().unwrap();
+        let root = workspace.path().join("missing-directory");
+        let mut run = None;
+        shell::key(&mut view, &root, &mut run, key(KeyCode::Char('!')), false);
+        view.input = "printf hello".into();
+        shell::key(&mut view, &root, &mut run, key(KeyCode::Enter), false);
+        assert!(!view.shell_mode);
+        assert!(run.is_none());
+        assert!(history_text(&view).contains("Could not start shell command:"));
+        assert_eq!(view.status, ready_for_next());
+    }
+
+    #[tokio::test]
+    async fn shell_enter_executes_in_project_and_shows_output_without_starting_conversation() {
+        let workspace = tempfile::tempdir().unwrap();
+        let mut session = session();
+        session.root = workspace.path().to_owned();
+        session.state = None;
+        let mut view = view();
+        let mut run = None;
+        shell::key(
+            &mut view,
+            &session.root,
+            &mut run,
+            key(KeyCode::Char('!')),
+            false,
+        );
+        view.input =
+            "printf 'hello shell'; printf 'failure detail' >&2; printf data > result; exit 7"
+                .into();
+        assert!(shell::key(
+            &mut view,
+            &session.root,
+            &mut run,
+            key(KeyCode::Enter),
+            false
+        ));
+        assert!(!view.shell_mode);
+        assert!(view.input.is_empty());
+        assert!(run.is_some());
+        // Enter cannot start an agent exchange while the shell is active.
+        view.input = "next message".into();
+        assert!(shell::key(
+            &mut view,
+            &session.root,
+            &mut run,
+            key(KeyCode::Enter),
+            false
+        ));
+        assert_eq!(view.input, "next message");
+        shell::finish(&mut view, &mut run, &mut session).await;
+        assert!(run.is_none());
+        assert!(session.state.is_none());
+        assert_eq!(
+            std::fs::read_to_string(workspace.path().join("result")).unwrap(),
+            "data"
+        );
+        let history = history_text(&view);
+        assert!(history.contains("hello shell\n"), "{history}");
+        assert!(history.contains("failure detail\n"), "{history}");
+        assert!(history.contains("exit status: 7"), "{history}");
+        assert_eq!(view.status, ready_for_next());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn shell_ctrl_c_kills_the_command_and_its_descendants() {
+        use std::io::{BufRead, Read};
+        let workspace = tempfile::tempdir().unwrap();
+        for name in ["events", "control"] {
+            assert!(
+                std::process::Command::new("mkfifo")
+                    .arg(workspace.path().join(name))
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+        }
+        let _control = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(workspace.path().join("control"))
+            .unwrap();
+        let events = workspace.path().join("events");
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+        let reader = std::thread::spawn(move || {
+            let mut input = std::io::BufReader::new(std::fs::File::open(events).unwrap());
+            let mut line = String::new();
+            input.read_line(&mut line).unwrap();
+            ready_tx.send(line).unwrap();
+            let mut tail = String::new();
+            input.read_to_string(&mut tail).unwrap();
+            tail
+        });
+        let mut session = session();
+        session.root = workspace.path().to_owned();
+        session.state = None;
+        let mut view = view();
+        let mut run = None;
+        shell::key(
+            &mut view,
+            &session.root,
+            &mut run,
+            key(KeyCode::Char('!')),
+            false,
+        );
+        view.input = "(exec 3>events; printf 'ready\\n' >&3; read -r release < control; printf late > late) & wait".into();
+        shell::key(
+            &mut view,
+            &session.root,
+            &mut run,
+            key(KeyCode::Enter),
+            false,
+        );
+        assert_eq!(ready_rx.await.unwrap(), "ready\n");
+        assert!(shell::key(
+            &mut view,
+            &session.root,
+            &mut run,
+            event::KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+            false
+        ));
+        shell::finish(&mut view, &mut run, &mut session).await;
+        assert_eq!(reader.join().unwrap(), "");
+        assert!(!workspace.path().join("late").exists());
+        assert_eq!(view.status, ready_for_next());
+    }
+
+    #[tokio::test]
+    async fn empty_shell_enter_returns_to_agent_without_starting_process() {
+        let mut view = view();
+        let session = session();
+        let mut run = None;
+        shell::key(
+            &mut view,
+            &session.root,
+            &mut run,
+            key(KeyCode::Char('!')),
+            false,
+        );
+        assert!(shell::key(
+            &mut view,
+            &session.root,
+            &mut run,
+            key(KeyCode::Enter),
+            false
+        ));
+        assert!(!view.shell_mode);
+        assert!(run.is_none());
     }
 
     #[test]

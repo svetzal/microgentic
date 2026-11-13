@@ -178,7 +178,7 @@ pub(super) fn complete(input: &str) -> Option<String> {
 pub(super) fn footer(input: &str, context_panel: bool) -> Styled {
     let text = match command_matches(input).as_deref() {
         None if context_panel => "Enter send | PgUp/PgDn chat | Alt-PgUp/PgDn context | Ctrl-O hide | Ctrl-C cancel | Esc quit".to_owned(),
-        None => "Enter send | Alt-Enter newline | PgUp/PgDn scroll | Ctrl-C cancel | Esc quit | Ctrl-O context | /help commands".to_owned(),
+        None => "Enter send | Alt-Enter newline | PgUp/PgDn scroll | Ctrl-C cancel | Esc quit | ! shell | Ctrl-O context | /help commands".to_owned(),
         Some([]) => "No matching command. Type /help to see commands.".to_owned(),
         Some([only]) => format!("{} · {} · Tab completes", only.usage(), only.summary),
         Some(several) => format!(

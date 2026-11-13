@@ -29,15 +29,34 @@ reported on the ordinary terminal. Each message carries the whole file.
 | Tab | Complete a slash command |
 | Ctrl-O | Show or hide the [context panel](#context-panel) |
 | Alt-Page Up, Alt-Page Down | Scroll the context panel (Shift works too) |
-| Ctrl-C | Cancel the current reply |
-| Esc | Exit, when no reply is running |
+| ! (at an empty prompt) | Enter shell-command mode |
+| Ctrl-C | Leave shell-command mode, or cancel the current command or reply |
+| Esc | Exit, when no command or reply is running |
 
 You can type your next message while a reply streams. Enter sends it when the
 current reply is complete.
 
 The conversation also ends when its terminal closes, or when the process gets
-SIGTERM or SIGHUP. A running reply is cancelled first, and the terminal's modes
-are restored.
+SIGTERM or SIGHUP. A running command or reply is cancelled first, and the
+terminal's modes are restored.
+
+## Shell commands
+
+At an empty prompt, type `!` to enter shell-command mode. The prompt changes to
+`!` and the key hints show the mode. For example, type `! zed .` and press Enter
+to open your editor in the project directory.
+
+Enter runs the command and returns the prompt to agent entry. Standard output,
+standard error, and the exit status appear in the conversation when it finishes.
+Ctrl-C leaves shell-command mode without running the draft. While a command runs,
+Ctrl-C cancels it. Commands need to finish before you can send another message.
+If Microgentic is replying, Enter keeps the shell draft until the reply
+finishes.
+
+Commands use your `$SHELL` (or `/bin/sh`) as a non-login shell, with your current
+environment. Each command starts in the project directory; `cd` affects only that
+command. Commands have no interactive stdin. They run as you and can change files.
+They are never sent to the model or added to its conversation context.
 
 ## Slash commands
 
