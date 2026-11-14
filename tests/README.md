@@ -241,6 +241,16 @@ Characterization of every case remaining before this migration:
 | `qwen_profile_rejects_high_before_connecting` | `qwen_profile_rejects_high_before_gateway_invocation`: actual dispatch returns unsupported-profile error for both providers, with no gateway request or metadata discovery. The driver returns the real error rather than fabricating an outcome/status. | Connection-refused sentinel address and subprocess error printing. |
 | `ollama_worker_preserves_native_reasoning_and_records_provider_controls` | Same full three-request reasoning matrix and effort test retain off/on behavior, exact model/context/output/temperature/effort, literal tool IDs and separate Ollama trace-control assertions. | NDJSON decoding, `thinking` wire name and absence of oMLX-only wire fields. |
 
+vLLM and LM Studio reach their servers through `src/openai_compatible.rs`, which
+rewrites the request body the oMLX gateway builds. Its unit tests fix the pure
+body rewrite for each dialect, the prepared request (URL, bearer header, body,
+timeout) without sending it, the trace controls, and the LM Studio window
+parser. `vllm_baseline_records_the_controls_of_its_dialect`,
+`lmstudio_baseline_records_the_controls_of_its_dialect` and the two
+`an_everyday_run_discovers_the_context_window_*` cases drive the dispatcher
+with the scripted gateway. None of this runs against a vLLM or LM Studio
+server, and Mojentic's reading of their replies is not verified here.
+
 The already landed `cli::capped_reasoning` coverage below remains unchanged.
 Expected messages and tool descriptors reuse
 `tests/fixtures/benchmark_continuity.json` (`microgentic_benchmark_continuity.v1`,

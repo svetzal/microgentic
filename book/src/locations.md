@@ -21,8 +21,8 @@ system releases the locks when their owners close or exit.
 
 ## Credentials
 
-Microgentic does not save credentials. It reads `OMLX_API_KEY` from the
-environment. Traces and provider snapshots do not contain credentials for the
+Microgentic does not save credentials. It reads `OMLX_API_KEY`, `VLLM_API_KEY`,
+and `LM_API_TOKEN` from the environment. Traces and provider snapshots do not contain credentials for the
 known provider variables.
 
 ## Remove everything

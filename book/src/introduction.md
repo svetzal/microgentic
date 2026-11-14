@@ -7,8 +7,9 @@ relevant, it checks work with deterministic probes, and it records what
 happened so that you can examine it later.
 
 You talk to Microgentic in a terminal conversation, or you send it one prompt
-from the shell. It connects to a local [oMLX](https://github.com/jundot/omlx)
-or [Ollama](https://ollama.com) server through the
+from the shell. It connects to a local [oMLX](https://github.com/jundot/omlx),
+[Ollama](https://ollama.com), [vLLM](https://docs.vllm.ai), or
+[LM Studio](https://lmstudio.ai) server through the
 [Mojentic](https://github.com/svetzal/mojentic-ru) gateways.
 
 ```sh
@@ -39,7 +40,7 @@ contracts, and trace schemas can change between versions. The
 [changelog](changelog.md) records each change.
 
 These features are not built yet: approval previews before edits, durable
-session resume, and providers other than oMLX and Ollama. Until then, the
+session resume, and providers other than oMLX, Ollama, vLLM, and LM Studio. Until then, the
 runtime can edit files and run commands when you ask it to do work.
 
 Microgentic also has a research side. A benchmark mode runs isolated task

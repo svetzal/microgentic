@@ -213,7 +213,7 @@ Each run has its own directory. See [Files and locations](locations.md).
 
 | Flag | Effect |
 | --- | --- |
-| `--provider omlx\|ollama` | Use this provider |
+| `--provider omlx\|ollama\|vllm\|lmstudio` | Use this provider |
 | `--model <id>` | Use this model |
 | `--reasoning-effort <level>` | Use this reasoning effort |
 | `--no-project-guidance` | Do not read `AGENTS.md` or `CLAUDE.md` |

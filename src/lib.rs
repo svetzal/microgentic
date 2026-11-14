@@ -13,6 +13,7 @@ pub mod contract;
 mod conversation;
 pub mod guidance;
 pub mod initial_context;
+mod openai_compatible;
 pub mod outcome;
 pub mod preferences;
 pub mod profile;

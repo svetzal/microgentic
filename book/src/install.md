@@ -57,7 +57,7 @@ cargo install --locked --path . --bin microgentic
 ## You also need a model server
 
 Microgentic does not include a model. Before you send your first message, start
-an oMLX or Ollama server and install a model on it. See
+an oMLX, Ollama, vLLM, or LM Studio server and install a model on it. See
 [Providers and models](providers.md).
 
 ## Uninstall

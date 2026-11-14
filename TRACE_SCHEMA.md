@@ -53,6 +53,11 @@ reasoning controls mean the gateway omits those parameters. The context-window
 source is `server_model_configuration`: `completion.num_ctx` is used for harness
 accounting, while oMLX controls the actual context limit. Credentials are omitted.
 
+vLLM and LM Studio snapshots identify `provider: "vllm"` or `"lmstudio"`. Their
+`provider_controls` contain only the output and reasoning fields that the
+request carries after the provider's dialect is applied, plus
+`context_window_source`. A field that is not sent is absent, not null.
+
 The event is written after deterministic context and repair-depth checks and
 immediately before `complete_stream`. A rejected call therefore has a ledger
 but no provider-request snapshot. A provider call that was actually attempted

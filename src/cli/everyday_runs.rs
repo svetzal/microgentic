@@ -763,8 +763,9 @@ fn discovered_window(wire: Wire) {
     let known = ScriptedGateway::replying(wire, reply()).with_metadata(metadata(
         262_144,
         match wire {
-            Wire::Omlx => "max_model_len",
+            Wire::Omlx | Wire::Vllm => "max_model_len",
             Wire::Ollama => "model_info.test.context_length",
+            Wire::Lmstudio => "loaded_instances.config.context_length",
         },
         None,
     ));
@@ -777,9 +778,10 @@ fn discovered_window(wire: Wire) {
     };
     let window = resolved(&after);
     // Ollama runs with the num_ctx it is sent (Microgentic's default here), so
-    // that bounds the advertised window; oMLX uses the advertised window.
+    // that bounds the advertised window; the other providers use the
+    // advertised window.
     let known_tokens = match wire {
-        Wire::Omlx => 262_144,
+        Wire::Omlx | Wire::Vllm | Wire::Lmstudio => 262_144,
         Wire::Ollama => 32_768,
     };
     assert_eq!(window["tokens"], known_tokens);
@@ -791,8 +793,9 @@ fn discovered_window(wire: Wire) {
     assert_eq!(
         window["field"],
         match wire {
-            Wire::Omlx => "max_model_len",
+            Wire::Omlx | Wire::Vllm => "max_model_len",
             Wire::Ollama => "model_info.test.context_length",
+            Wire::Lmstudio => "loaded_instances.config.context_length",
         }
     );
     let fallback = resolved(&before);
@@ -838,6 +841,16 @@ fn an_everyday_run_discovers_the_context_window_omlx() {
 #[test]
 fn an_everyday_run_discovers_the_context_window_ollama() {
     discovered_window(Wire::Ollama);
+}
+
+#[test]
+fn an_everyday_run_discovers_the_context_window_vllm() {
+    discovered_window(Wire::Vllm);
+}
+
+#[test]
+fn an_everyday_run_discovers_the_context_window_lmstudio() {
+    discovered_window(Wire::Lmstudio);
 }
 
 /// An Ollama model's `num_ctx` parameter is the window it runs at when a

@@ -14,7 +14,7 @@ microgentic setup --apply
 microgentic
 ```
 
-Run an oMLX or Ollama server before sending your first message. Setup lets you
+Run an oMLX, Ollama, vLLM, or LM Studio server before sending your first message. Setup lets you
 select the provider, model, and effort level. It makes no provider request.
 The TUI opens a conversation in your current project; ask for work when ready.
 
@@ -70,7 +70,7 @@ to the user-focused control surface.
 
 ## Requirements
 
-- An oMLX or Ollama server with a model installed; Qwen models are the benchmark
+- An oMLX, Ollama, vLLM, or LM Studio server with a model installed; Qwen models are the benchmark
   defaults
 - For source builds: Rust 1.99 or later and network access for the locked Mojentic
   Git dependency
@@ -80,7 +80,8 @@ to the user-focused control surface.
 `microgentic setup` saves the provider, default model, and reasoning effort.
 Settings live in `$XDG_CONFIG_HOME/microgentic/config.json`, or
 `~/.config/microgentic/config.json`. Server addresses and credentials come from
-the environment: `OMLX_HOST`, `OMLX_API_KEY`, `OMLX_TIMEOUT`, and `OLLAMA_HOST`.
+the environment: `OMLX_HOST`, `OMLX_API_KEY`, `OMLX_TIMEOUT`, `OLLAMA_HOST`,
+`VLLM_HOST`, `VLLM_API_KEY`, `LMSTUDIO_HOST`, and `LM_API_TOKEN`.
 Explicit flags override saved defaults. Benchmark mode and the compatibility
 executable never read personal settings. See
 [Providers and models](https://vetzal.ca/microgentic/providers.html).

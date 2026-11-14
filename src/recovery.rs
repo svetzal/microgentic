@@ -153,11 +153,17 @@ pub(crate) fn credentials() -> Vec<String> {
     if let Ok(credentials) = TEST_CREDENTIALS.try_with(Clone::clone) {
         return credentials;
     }
-    ["OMLX_API_KEY", "OPENAI_API_KEY", "OLLAMA_API_KEY"]
-        .into_iter()
-        .filter_map(|key| std::env::var(key).ok())
-        .filter(|s| !s.is_empty())
-        .collect()
+    [
+        "OMLX_API_KEY",
+        "OPENAI_API_KEY",
+        "OLLAMA_API_KEY",
+        crate::openai_compatible::Dialect::Vllm.key_variable(),
+        crate::openai_compatible::Dialect::Lmstudio.key_variable(),
+    ]
+    .into_iter()
+    .filter_map(|key| std::env::var(key).ok())
+    .filter(|s| !s.is_empty())
+    .collect()
 }
 pub(crate) fn redact_value(value: &mut Value, secrets: &[String]) -> bool {
     match value {

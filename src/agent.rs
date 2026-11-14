@@ -3,6 +3,7 @@ use crate::acceptance_interactions::{
 };
 use crate::acceptance_ledger::{AcceptanceLedgerSnapshot, AcceptanceLedgerSpec};
 use crate::acceptance_plan::{DEFAULT_MAX_PLAN_ITEMS, plan_acceptance_with_gateway};
+use crate::openai_compatible::{Dialect, OpenAiCompatibleGateway};
 use crate::outcome::{HardStopCause, RunOutcome, WithheldGate};
 use crate::sha256::sha256_hex;
 use crate::tools::{
@@ -78,6 +79,8 @@ pub enum Provider {
     #[default]
     Omlx,
     Ollama,
+    Vllm,
+    Lmstudio,
 }
 
 impl Provider {
@@ -85,6 +88,8 @@ impl Provider {
         match self {
             Self::Omlx => "omlx",
             Self::Ollama => "ollama",
+            Self::Vllm => "vllm",
+            Self::Lmstudio => "lmstudio",
         }
     }
 
@@ -92,7 +97,24 @@ impl Provider {
         match self {
             Self::Omlx => "Qwen3.8-27B-MLX-8bit",
             Self::Ollama => "qwen3.8:27b-mxfp8",
+            Self::Vllm => "Qwen/Qwen3.8-27B",
+            Self::Lmstudio => "qwen/qwen3.8-27b",
         }
+    }
+
+    /// The provider's gateway for calls outside the worker's recovery path:
+    /// model listing, context-window discovery and session intent summaries.
+    /// It reads the same host and key environment variables as the gateway
+    /// the worker uses.
+    pub(crate) fn gateway(self) -> mojentic::error::Result<Box<dyn LlmGateway>> {
+        Ok(match self {
+            Self::Omlx => Box::new(OmlxGateway::new()),
+            Self::Ollama => Box::new(OllamaGateway::new()),
+            Self::Vllm => Box::new(OpenAiCompatibleGateway::from_env(Dialect::Vllm).direct()?),
+            Self::Lmstudio => {
+                Box::new(OpenAiCompatibleGateway::from_env(Dialect::Lmstudio).direct()?)
+            }
+        })
     }
 }
 
@@ -437,6 +459,18 @@ async fn run_agent_entry(
                 call,
                 evidence.clone(),
             )?),
+            Provider::Vllm => Box::new(crate::recovery::WorkerGateway::new(
+                OpenAiCompatibleGateway::from_env(Dialect::Vllm),
+                &config.recovery,
+                call,
+                evidence.clone(),
+            )?),
+            Provider::Lmstudio => Box::new(crate::recovery::WorkerGateway::new(
+                OpenAiCompatibleGateway::from_env(Dialect::Lmstudio),
+                &config.recovery,
+                call,
+                evidence.clone(),
+            )?),
         },
     };
     #[cfg(all(
@@ -633,7 +667,7 @@ async fn run_agent_with_gateway_inner<G: LlmGateway + ?Sized>(
         .clone()
         .map(|window| match config.provider {
             Provider::Ollama => window.within_num_ctx(requested_num_ctx(&completion_config)),
-            Provider::Omlx => window,
+            Provider::Omlx | Provider::Vllm | Provider::Lmstudio => window,
         });
     // Accounting uses the known window; `num_ctx` and run policies keep
     // `context_window_tokens`.
@@ -4003,6 +4037,14 @@ fn trace_provider_request(input: ProviderRequestTraceInput<'_>) -> Result<()> {
                     },
                     "context_window_source": "request_options",
                 }),
+                Provider::Vllm => crate::openai_compatible::provider_controls(
+                    Dialect::Vllm,
+                    completion_config,
+                ),
+                Provider::Lmstudio => crate::openai_compatible::provider_controls(
+                    Dialect::Lmstudio,
+                    completion_config,
+                ),
             },
             "turn": turn,
             "llm_call_depth": llm_call_depth,
@@ -5556,6 +5598,8 @@ async fn sample_process_active(provider: Provider) -> Option<bool> {
             match provider {
                 Provider::Omlx => "omlx",
                 Provider::Ollama => "ollama runner",
+                Provider::Vllm => "vllm",
+                Provider::Lmstudio => "LM Studio|lmstudio|llmster",
             },
         ],
     )

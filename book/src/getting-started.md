@@ -2,12 +2,14 @@
 
 ## 1. Start a model server
 
-Start oMLX or Ollama, and install a model on it. The default models are
-`Qwen3.8-27B-MLX-8bit` for oMLX and `qwen3.8:27b-mxfp8` for Ollama. You can
-choose a different installed model during setup.
+Start oMLX, Ollama, vLLM, or LM Studio, and install a model on it. Each
+provider has a default model, for example `Qwen3.8-27B-MLX-8bit` for oMLX and
+`qwen3.8:27b-mxfp8` for Ollama. You can choose a different installed model
+during setup.
 
-If your server is not at its default address, set `OMLX_HOST` or
-`OLLAMA_HOST`. See [Providers and models](providers.md).
+If your server is not at its default address, set `OMLX_HOST`, `OLLAMA_HOST`,
+`VLLM_HOST`, or `LMSTUDIO_HOST`. See [Providers and models](providers.md) for
+the default models, the variables, and the limits of each provider.
 
 ## 2. Choose your defaults
 

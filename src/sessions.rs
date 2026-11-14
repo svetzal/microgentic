@@ -381,13 +381,8 @@ pub(crate) async fn refresh_intent(path: PathBuf) {
         return;
     }
     let _ = cancellation;
-    match state.provider {
-        crate::agent::Provider::Ollama => {
-            let _ = summarize(&path, &mojentic::llm::gateways::OllamaGateway::new()).await;
-        }
-        crate::agent::Provider::Omlx => {
-            let _ = summarize(&path, &mojentic::llm::gateways::OmlxGateway::new()).await;
-        }
+    if let Ok(gateway) = state.provider.gateway() {
+        let _ = summarize(&path, gateway.as_ref()).await;
     }
 }
 

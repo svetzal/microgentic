@@ -8,9 +8,7 @@
 //! Run policies that read the window (compaction, file observation budgets,
 //! stall projections, conversation trimming) also keep the configured value.
 use crate::agent::Provider;
-use mojentic::llm::LlmGateway;
 use mojentic::llm::gateway::ModelContextWindow;
-use mojentic::llm::gateways::{OllamaGateway, OmlxGateway};
 use serde::{Deserialize, Serialize};
 use std::future::Future;
 use std::time::{Duration, Instant};
@@ -97,16 +95,20 @@ impl ContextWindow {
                 .discover_within(io.get_model_context_window(model), DISCOVERY_TIMEOUT)
                 .await;
         }
-        let gateway = metadata_gateway(provider);
         #[cfg(all(
             feature = "termination-test-provider",
             microgentic_termination_test_build,
             unix
         ))]
-        let gateway = crate::tui_test_provider::gateway(tokio_util::sync::CancellationToken::new())
-            .unwrap_or(gateway);
-        self.discover_within(gateway.get_model_context_window(model), DISCOVERY_TIMEOUT)
-            .await
+        if let Some(gateway) =
+            crate::tui_test_provider::gateway(tokio_util::sync::CancellationToken::new())
+        {
+            return self
+                .discover_within(gateway.get_model_context_window(model), DISCOVERY_TIMEOUT)
+                .await;
+        }
+        let lookup = async { provider.gateway()?.get_model_context_window(model).await };
+        self.discover_within(lookup, DISCOVERY_TIMEOUT).await
     }
 
     async fn discover_within(
@@ -151,15 +153,6 @@ impl ContextWindow {
                 ..self
             },
         }
-    }
-}
-
-/// The gateway that answers the window query, reading the same host and key
-/// environment variables as the gateway the run itself uses.
-fn metadata_gateway(provider: Provider) -> Box<dyn LlmGateway> {
-    match provider {
-        Provider::Omlx => Box::new(OmlxGateway::new()),
-        Provider::Ollama => Box::new(OllamaGateway::new()),
     }
 }
 

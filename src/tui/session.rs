@@ -398,8 +398,6 @@ pub(super) async fn finish_model_listing(view: &mut View, session: &mut Session)
 /// Ask the provider for its models, bounded so a stalled server cannot
 /// leave the request open.
 async fn available_models(provider: Provider) -> Result<Vec<String>, String> {
-    use mojentic::llm::LlmGateway;
-    use mojentic::llm::gateways::{OllamaGateway, OmlxGateway};
     let request = async {
         #[cfg(all(
             feature = "termination-test-provider",
@@ -411,10 +409,7 @@ async fn available_models(provider: Provider) -> Result<Vec<String>, String> {
         {
             return gateway.get_available_models().await;
         }
-        match provider {
-            Provider::Omlx => OmlxGateway::new().get_available_models().await,
-            Provider::Ollama => OllamaGateway::new().get_available_models().await,
-        }
+        provider.gateway()?.get_available_models().await
     };
     match tokio::time::timeout(MODEL_LIST_TIMEOUT, request).await {
         Ok(result) => result.map_err(|error| error.to_string()),

@@ -145,11 +145,12 @@ struct RunArgs {
     #[arg(long, help_heading = "Advanced / research")]
     contract: Option<PathBuf>,
 
-    /// Local inference provider. Uses OMLX_HOST or OLLAMA_HOST.
+    /// Local inference provider. Uses OMLX_HOST, OLLAMA_HOST, VLLM_HOST, or LMSTUDIO_HOST.
     #[arg(long, value_enum)]
     provider: Option<Provider>,
 
-    /// Provider model ID. Defaults to Qwen3.8-27B-MLX-8bit (oMLX) or qwen3.8:27b-mxfp8 (Ollama).
+    /// Provider model ID. Defaults to Qwen3.8-27B-MLX-8bit (oMLX), qwen3.8:27b-mxfp8 (Ollama),
+    /// Qwen/Qwen3.8-27B (vLLM), or qwen/qwen3.8-27b (LM Studio).
     #[arg(long)]
     model: Option<String>,
 
@@ -166,7 +167,7 @@ struct RunArgs {
     )]
     max_model_interactions: usize,
 
-    /// Context window for harness accounting and Ollama num_ctx; configure the actual oMLX limit on the server.
+    /// Context window for harness accounting and Ollama num_ctx; configure the actual oMLX, vLLM, or LM Studio limit on the server.
     /// Defaults to 262144 for Qwen3.8-27B-MLX-8bit and Mojentic accounting otherwise.
     #[arg(long, help_heading = "Advanced / research")]
     context_window_tokens: Option<usize>,
@@ -542,9 +543,12 @@ mod tests {
 
     #[test]
     fn provider_defaults_and_explicit_model_are_resolved_together() {
-        for (provider, model) in [
-            ("omlx", "Qwen3.8-27B-MLX-8bit"),
-            ("ollama", "qwen3.8:27b-mxfp8"),
+        // vLLM and LM Studio models have no table entry: the server sets the limit.
+        for (provider, model, table_window) in [
+            ("omlx", "Qwen3.8-27B-MLX-8bit", Some(262144)),
+            ("ollama", "qwen3.8:27b-mxfp8", Some(262144)),
+            ("vllm", "Qwen/Qwen3.8-27B", None),
+            ("lmstudio", "qwen/qwen3.8-27b", None),
         ] {
             for override_model in [None, Some("custom-model")] {
                 let mut args = vec![
@@ -567,7 +571,7 @@ mod tests {
                 assert_eq!(
                     config.context_window_tokens,
                     if override_model.is_none() {
-                        Some(262144)
+                        table_window
                     } else {
                         None
                     }
@@ -938,7 +942,7 @@ fn command_definition() -> clap::Command {
 
 #[derive(Debug, Args)]
 #[command(
-    after_help = "Examples:\n  microgentic setup\n  microgentic setup --provider ollama --model qwen3.8:27b-mxfp8 --reasoning-effort low --apply\n\nCredentials and server URLs remain in OMLX_HOST/OMLX_API_KEY or OLLAMA_HOST. No provider call is made during setup."
+    after_help = "Examples:\n  microgentic setup\n  microgentic setup --provider ollama --model qwen3.8:27b-mxfp8 --reasoning-effort low --apply\n\nCredentials and server URLs remain in OMLX_HOST/OMLX_API_KEY, OLLAMA_HOST, VLLM_HOST/VLLM_API_KEY, or LMSTUDIO_HOST/LM_API_TOKEN. No provider call is made during setup."
 )]
 struct SetupArgs {
     #[arg(long, value_enum)]
@@ -1648,11 +1652,16 @@ fn setup(args: SetupArgs, explicit_path: Option<&Path>) -> Result<()> {
         );
     }
     let provider = if wizard {
-        let value = ask("Provider (omlx/ollama)", prefs.provider.as_str())?;
+        let value = ask(
+            "Provider (omlx/ollama/vllm/lmstudio)",
+            prefs.provider.as_str(),
+        )?;
         match value.as_str() {
             "omlx" => Provider::Omlx,
             "ollama" => Provider::Ollama,
-            _ => bail!("provider must be omlx or ollama"),
+            "vllm" => Provider::Vllm,
+            "lmstudio" => Provider::Lmstudio,
+            _ => bail!("provider must be omlx, ollama, vllm, or lmstudio"),
         }
     } else {
         args.provider.unwrap_or(prefs.provider)

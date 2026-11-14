@@ -15,12 +15,16 @@ pub(super) use fixtures::*;
 pub(super) enum Wire {
     Omlx,
     Ollama,
+    Vllm,
+    Lmstudio,
 }
 impl Wire {
     pub(super) fn name(self) -> &'static str {
         match self {
             Self::Omlx => "omlx",
             Self::Ollama => "ollama",
+            Self::Vllm => "vllm",
+            Self::Lmstudio => "lmstudio",
         }
     }
 }

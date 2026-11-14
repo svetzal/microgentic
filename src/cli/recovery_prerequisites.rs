@@ -125,6 +125,11 @@ fn baseline(wire: Wire) {
             Wire::Omlx =>
                 json!({"max_tokens":8192, "enable_thinking":true, "reasoning_effort":null,
             "chat_template_kwargs":{"preserve_thinking":true}, "context_window_source":"server_model_configuration"}),
+            Wire::Vllm => json!({"max_tokens":8192,
+            "chat_template_kwargs":{"preserve_thinking":true, "enable_thinking":true},
+            "stream_options":{"include_usage":true}, "context_window_source":"server_model_configuration"}),
+            Wire::Lmstudio => json!({"max_tokens":8192,
+            "stream_options":{"include_usage":true}, "context_window_source":"server_model_configuration"}),
         }
     );
     let finished: Vec<_> = events
@@ -250,4 +255,14 @@ fn ollama_baseline_preserves_ordered_progress_and_metrics() {
 #[test]
 fn omlx_baseline_preserves_native_reasoning_and_controls() {
     baseline(Wire::Omlx);
+}
+
+#[test]
+fn vllm_baseline_records_the_controls_of_its_dialect() {
+    baseline(Wire::Vllm);
+}
+
+#[test]
+fn lmstudio_baseline_records_the_controls_of_its_dialect() {
+    baseline(Wire::Lmstudio);
 }

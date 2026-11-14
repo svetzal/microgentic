@@ -10,6 +10,22 @@ The release workflow publishes each version's section as its GitHub release note
 
 ## [Unreleased]
 
+### Added
+
+- vLLM and LM Studio providers. Choose one with `--provider vllm` or
+  `--provider lmstudio`, or in `microgentic setup`. Server addresses and keys
+  come from `VLLM_HOST`/`VLLM_API_KEY` and `LMSTUDIO_HOST`/`LM_API_TOKEN`. Each
+  provider receives reasoning effort in its own form, and Microgentic reads
+  the context window from the server (`max_model_len` on vLLM, the loaded
+  instance's `context_length` on LM Studio). Limit: Microgentic does not see
+  vLLM reasoning text, because current vLLM returns it as `reasoning` and the
+  Mojentic 3.0.1 gateway reads only `reasoning_content`. With vLLM there is no
+  thinking display, no reasoning accounting or thinking-only cap, and nothing
+  for `--preserve-reasoning` to keep; answers and tool calls work. LM Studio
+  does not document the `reasoning_effort` values its OpenAI endpoint accepts.
+  Neither provider has been run against a live server yet. See
+  [Providers and models](https://vetzal.ca/microgentic/providers.html).
+
 ## [0.9.0] - 2026-11-14
 
 ### Added
