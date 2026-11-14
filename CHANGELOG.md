@@ -10,6 +10,15 @@ The release workflow publishes each version's section as its GitHub release note
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-14
+
+### Added
+
+- Shell-command mode in the terminal conversation. Type `!` at an empty prompt,
+  then a command, and press Enter to run it in the project directory with your
+  `$SHELL`. Output and exit status appear in the conversation, but are never
+  sent to the model. Ctrl-C leaves the mode or cancels a running command.
+
 ### Fixed
 
 - Explicit `read_file` calls can read gitignored local references without changing
@@ -414,7 +423,8 @@ experimental harness into a small terminal interface for everyday use.
 - A successful process exit still needs inspection of the native terminal
   result when classifying benchmark outcomes.
 
-[Unreleased]: https://github.com/svetzal/microgentic/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/svetzal/microgentic/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/svetzal/microgentic/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/svetzal/microgentic/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/svetzal/microgentic/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/svetzal/microgentic/compare/v0.5.0...v0.6.0
