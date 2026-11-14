@@ -41,7 +41,7 @@
     },
     {
       "function": {
-        "description": "Read a UTF-8 file under the active experiment root.",
+        "description": "Read a named UTF-8 file under the active project root, including gitignored local references. Task read restrictions still apply.",
         "name": "read_file",
         "parameters": {
           "properties": {
@@ -467,7 +467,7 @@
         ],
         "context_window_tokens": 262144,
         "delta_chars_from_previous_call": null,
-        "estimated_tokens": 1246,
+        "estimated_tokens": 1266,
         "llm_call_depth": 0,
         "max_model_interactions": 4,
         "message_chars": 1297,
@@ -482,11 +482,11 @@
           "system": 1,
           "user": 1
         },
-        "tool_descriptor_chars": 3686,
-        "total_chars": 4983,
+        "tool_descriptor_chars": 3764,
+        "total_chars": 5061,
         "transcript_policy": "summarized-transcript",
         "turn": 1,
-        "utilization": 0.00475311279296875
+        "utilization": 0.00482940673828125
       },
       {
         "assembly_policy": "append_summarized_tool_transcript",
@@ -547,13 +547,13 @@
         ],
         "context_window_tokens": 262144,
         "delta_chars_from_previous_call": 294,
-        "estimated_tokens": 1320,
+        "estimated_tokens": 1339,
         "llm_call_depth": 1,
         "max_model_interactions": 4,
         "message_chars": 1591,
         "message_count": 4,
         "pressure_band": "green",
-        "previous_call_total_chars": 4983,
+        "previous_call_total_chars": 5061,
         "role_chars": {
           "assistant": 66,
           "system": 954,
@@ -566,11 +566,11 @@
           "tool": 1,
           "user": 1
         },
-        "tool_descriptor_chars": 3686,
-        "total_chars": 5277,
+        "tool_descriptor_chars": 3764,
+        "total_chars": 5355,
         "transcript_policy": "summarized-transcript",
         "turn": 1,
-        "utilization": 0.005035400390625
+        "utilization": 0.005107879638671875
       }
     ],
     "goal": [
@@ -605,7 +605,7 @@
         ],
         "context_window_tokens": 262144,
         "delta_chars_from_previous_call": null,
-        "estimated_tokens": 1534,
+        "estimated_tokens": 1553,
         "llm_call_depth": 0,
         "max_model_interactions": 4,
         "message_chars": 2447,
@@ -620,11 +620,11 @@
           "system": 1,
           "user": 1
         },
-        "tool_descriptor_chars": 3686,
-        "total_chars": 6133,
+        "tool_descriptor_chars": 3764,
+        "total_chars": 6211,
         "transcript_policy": "summarized-transcript",
         "turn": 1,
-        "utilization": 0.00585174560546875
+        "utilization": 0.005924224853515625
       },
       {
         "assembly_policy": "append_summarized_tool_transcript",
@@ -685,13 +685,13 @@
         ],
         "context_window_tokens": 262144,
         "delta_chars_from_previous_call": 294,
-        "estimated_tokens": 1607,
+        "estimated_tokens": 1627,
         "llm_call_depth": 1,
         "max_model_interactions": 4,
         "message_chars": 2741,
         "message_count": 4,
         "pressure_band": "green",
-        "previous_call_total_chars": 6133,
+        "previous_call_total_chars": 6211,
         "role_chars": {
           "assistant": 66,
           "system": 1802,
@@ -704,11 +704,11 @@
           "tool": 1,
           "user": 1
         },
-        "tool_descriptor_chars": 3686,
-        "total_chars": 6427,
+        "tool_descriptor_chars": 3764,
+        "total_chars": 6505,
         "transcript_policy": "summarized-transcript",
         "turn": 1,
-        "utilization": 0.006130218505859375
+        "utilization": 0.006206512451171875
       }
     ]
   },
