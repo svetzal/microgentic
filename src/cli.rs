@@ -1,9 +1,11 @@
 use crate::acceptance_interactions::{
     AcceptanceInteractionCandidate, DEFAULT_MAX_INTERACTION_OUTPUT_TOKENS,
-    DEFAULT_MAX_INTERACTION_SCENARIOS, author_interaction_evidence, plan_acceptance_interactions,
+    DEFAULT_MAX_INTERACTION_SCENARIOS, author_interaction_evidence_with_gateway,
+    plan_acceptance_interactions_with_gateway,
 };
 use crate::acceptance_plan::{
-    AcceptancePlan, DEFAULT_MAX_PLAN_ITEMS, DEFAULT_MAX_PLAN_OUTPUT_TOKENS, plan_acceptance,
+    AcceptancePlan, DEFAULT_MAX_PLAN_ITEMS, DEFAULT_MAX_PLAN_OUTPUT_TOKENS,
+    plan_acceptance_with_gateway,
 };
 use crate::agent::{
     AgentRunConfig, Provider, RepairHandoffPolicy, TranscriptPolicy,
@@ -542,6 +544,47 @@ mod tests {
     }
 
     #[test]
+    fn planning_commands_resolve_the_provider_and_its_default_model() {
+        for (extra, provider, model) in [
+            (vec![], Provider::Omlx, "Qwen3.8-27B-MLX-8bit"),
+            (
+                vec!["--provider", "vllm"],
+                Provider::Vllm,
+                "Qwen/Qwen3.8-27B",
+            ),
+            (
+                vec!["--provider", "lmstudio", "--model", "custom-model"],
+                Provider::Lmstudio,
+                "custom-model",
+            ),
+        ] {
+            for command in [
+                vec!["plan-task"],
+                vec!["plan-interactions", "--plan", "plan.json"],
+                vec![
+                    "author-interaction-evidence",
+                    "--plan",
+                    "plan.json",
+                    "--candidate",
+                    "candidate.json",
+                ],
+            ] {
+                let mut args = vec!["harness"];
+                args.extend(command);
+                args.extend(["--goal", "task.md", "--trace-dir", "traces"]);
+                args.extend(extra.iter().copied());
+                let advisor = match Cli::try_parse_from(args).unwrap().command.unwrap() {
+                    Command::PlanTask { advisor, .. }
+                    | Command::PlanInteractions { advisor, .. }
+                    | Command::AuthorInteractionEvidence { advisor, .. } => advisor,
+                    _ => panic!("planning command"),
+                };
+                assert_eq!(advisor.resolve(), (provider, model.to_string()));
+            }
+        }
+    }
+
+    #[test]
     fn provider_defaults_and_explicit_model_are_resolved_together() {
         // vLLM and LM Studio models have no table entry: the server sets the limit.
         for (provider, model, table_window) in [
@@ -773,9 +816,8 @@ enum Command {
         #[arg(long)]
         trace_dir: PathBuf,
 
-        /// oMLX model ID from /v1/models.
-        #[arg(long, default_value = DEFAULT_MODEL)]
-        model: String,
+        #[command(flatten)]
+        advisor: AdvisorArgs,
 
         /// Maximum acceptance items allowed in the proposal.
         #[arg(long, default_value_t = DEFAULT_MAX_PLAN_ITEMS)]
@@ -805,9 +847,8 @@ enum Command {
         #[arg(long)]
         trace_dir: PathBuf,
 
-        /// oMLX model ID from /v1/models.
-        #[arg(long, default_value = DEFAULT_MODEL)]
-        model: String,
+        #[command(flatten)]
+        advisor: AdvisorArgs,
 
         /// Maximum interaction scenarios allowed in the proposal.
         #[arg(long, default_value_t = DEFAULT_MAX_INTERACTION_SCENARIOS)]
@@ -841,14 +882,34 @@ enum Command {
         #[arg(long)]
         trace_dir: PathBuf,
 
-        /// oMLX model ID from /v1/models.
-        #[arg(long, default_value = DEFAULT_MODEL)]
-        model: String,
+        #[command(flatten)]
+        advisor: AdvisorArgs,
 
         /// Maximum generated tokens for each isolated attempt.
         #[arg(long, default_value_t = DEFAULT_MAX_INTERACTION_OUTPUT_TOKENS)]
         max_output_tokens: usize,
     },
+}
+
+/// Provider and model for the isolated planning commands.
+#[derive(Debug, Args)]
+struct AdvisorArgs {
+    /// Local inference provider. Uses OMLX_HOST, OLLAMA_HOST, VLLM_HOST, or LMSTUDIO_HOST.
+    #[arg(long, value_enum, default_value_t)]
+    provider: Provider,
+
+    /// Provider model ID. Defaults to the provider's default model.
+    #[arg(long)]
+    model: Option<String>,
+}
+
+impl AdvisorArgs {
+    fn resolve(self) -> (Provider, String) {
+        let model = self
+            .model
+            .unwrap_or_else(|| self.provider.default_model().to_string());
+        (self.provider, model)
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -1219,7 +1280,7 @@ async fn dispatch_cli(
             goal,
             contract,
             trace_dir,
-            model,
+            advisor,
             max_items,
             max_output_tokens,
         } => {
@@ -1230,7 +1291,10 @@ async fn dispatch_cli(
                 bail!("--max-output-tokens must be greater than zero");
             }
             let resolved = resolve_contract(contract_source(goal, contract)?, Budgets::default())?;
-            let summary = plan_acceptance(
+            let (provider, model) = advisor.resolve();
+            let gateway = provider.gateway()?;
+            let summary = plan_acceptance_with_gateway(
+                gateway.as_ref(),
                 &model,
                 &resolved.guidance,
                 &trace_dir,
@@ -1245,7 +1309,7 @@ async fn dispatch_cli(
             contract,
             plan,
             trace_dir,
-            model,
+            advisor,
             max_scenarios,
             max_output_tokens,
         } => {
@@ -1260,7 +1324,10 @@ async fn dispatch_cli(
                 .with_context(|| format!("reading atomic plan file {}", plan.display()))?;
             let plan: AcceptancePlan = serde_json::from_str(&plan_text)
                 .with_context(|| format!("decoding atomic plan file {}", plan.display()))?;
-            let summary = plan_acceptance_interactions(
+            let (provider, model) = advisor.resolve();
+            let gateway = provider.gateway()?;
+            let summary = plan_acceptance_interactions_with_gateway(
+                gateway.as_ref(),
                 &model,
                 &resolved.guidance,
                 &plan,
@@ -1277,7 +1344,7 @@ async fn dispatch_cli(
             plan,
             candidate,
             trace_dir,
-            model,
+            advisor,
             max_output_tokens,
         } => {
             if max_output_tokens == 0 {
@@ -1298,7 +1365,10 @@ async fn dispatch_cli(
                     candidate.display()
                 )
             })?;
-            let summary = author_interaction_evidence(
+            let (provider, model) = advisor.resolve();
+            let gateway = provider.gateway()?;
+            let summary = author_interaction_evidence_with_gateway(
+                gateway.as_ref(),
                 &model,
                 &resolved.guidance,
                 &plan,

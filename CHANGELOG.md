@@ -25,6 +25,10 @@ The release workflow publishes each version's section as its GitHub release note
   does not document the `reasoning_effort` values its OpenAI endpoint accepts.
   Neither provider has been run against a live server yet. See
   [Providers and models](https://vetzal.ca/microgentic/providers.html).
+- `--provider` on `plan-task`, `plan-interactions`, and
+  `author-interaction-evidence`. These commands always used oMLX before. The
+  default is still oMLX, and `--model` now defaults to the provider's default
+  model.
 
 ## [0.9.0] - 2026-11-14
 
