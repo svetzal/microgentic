@@ -6,7 +6,14 @@ in the conversation, and the trace records it.
 ## Project tools
 
 The file tools read, list, write, and edit files below the project directory.
-They do not reach paths outside it, and they skip ignored paths.
+They do not reach paths outside it. `read_file` can read an explicitly named
+UTF-8 file even when Git ignores it, such as downloaded reference text or local
+project notes. Line ranges and byte limits still apply. Task read restrictions
+also apply to the resolved target of a symbolic link.
+
+Ignored files stay out of directory discovery, and file writes and edits still
+respect ignore rules. Reading a reference does not change `.gitignore`, stage
+the file, or load other files from its directory.
 
 The shell tool runs commands in the project directory. It uses a non-login
 shell with your `PATH` and active virtual environment.

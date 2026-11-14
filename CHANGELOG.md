@@ -10,6 +10,12 @@ The release workflow publishes each version's section as its GitHub release note
 
 ## [Unreleased]
 
+### Fixed
+
+- Explicit `read_file` calls can read gitignored local references without changing
+  Git exclusions. Discovery and write restrictions remain unchanged; direct reads
+  enforce project and task boundaries on symbolic-link targets.
+
 ## [0.8.0] - 2026-11-03
 
 ### Added

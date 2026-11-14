@@ -1658,7 +1658,7 @@ impl LlmTool for ReadFileTool {
             r#type: "function".to_string(),
             function: FunctionDescriptor {
                 name: "read_file".to_string(),
-                description: "Read a UTF-8 file under the active experiment root.".to_string(),
+                description: "Read a named UTF-8 file under the active project root, including gitignored local references. Task read restrictions still apply.".to_string(),
                 parameters: json!({
                     "type": "object",
                     "properties": {
@@ -1689,9 +1689,18 @@ impl ReadFileTool {
         let line_end = args.get("line_end").and_then(Value::as_u64);
         validate_line_range(line_start, line_end)?;
         let path = self.scope.resolve_existing_or_new(path_arg)?;
-        self.scope.check_read(&path)?;
-        self.scope.note_read_target(&path);
-        let content = tokio::fs::read_to_string(&path)
+        // A named read is explicit access, not workspace discovery. Git ignore
+        // rules keep references out of discovery and Git, not out of this read.
+        self.scope
+            .check_access("read", &path, &self.scope.access.read_allow)?;
+        let canonical = path
+            .canonicalize()
+            .with_context(|| format!("canonicalizing read path {}", path.display()))?;
+        self.scope
+            .check_access("read", &canonical, &self.scope.access.read_allow)?;
+        self.scope.relative_path(&canonical)?;
+        self.scope.note_read_target(&canonical);
+        let content = tokio::fs::read_to_string(&canonical)
             .await
             .with_context(|| format!("reading {}", path.display()))?;
         let lines = select_lines(&content, line_start, line_end);
@@ -6241,7 +6250,7 @@ bytes[0..5] \"cafe\\n\""
     }
 
     #[tokio::test]
-    async fn gitignored_paths_are_invisible_to_direct_file_tools() {
+    async fn named_reads_allow_ignored_files_without_enabling_writes_or_discovery() {
         let temp = tempfile::tempdir().unwrap();
         let scope = scope(&temp);
         std::fs::write(temp.path().join(".gitignore"), "ignored.txt\ncache/\n").unwrap();
@@ -6252,12 +6261,17 @@ bytes[0..5] \"cafe\\n\""
         let reader = ReadFileTool {
             scope: scope.clone(),
         };
-        let read_error = reader
-            .read(&HashMap::from([("path".to_string(), json!("ignored.txt"))]))
-            .await
-            .unwrap_err()
-            .to_string();
-        assert!(read_error.contains("ignored by workspace visibility policy"));
+        for (path, expected) in [("ignored.txt", "secret"), ("cache/value.txt", "generated")] {
+            let result = reader
+                .read(&HashMap::from([("path".to_string(), json!(path))]))
+                .await
+                .unwrap();
+            assert_eq!(result["content"], expected);
+        }
+        assert_eq!(
+            std::fs::read_to_string(temp.path().join(".gitignore")).unwrap(),
+            "ignored.txt\ncache/\n"
+        );
 
         let writer = WriteFileTool {
             scope: scope.clone(),
@@ -6283,6 +6297,78 @@ bytes[0..5] \"cafe\\n\""
             .collect::<Vec<_>>();
         assert!(!paths.contains(&"ignored.txt"));
         assert!(!paths.contains(&"cache"));
+    }
+
+    #[tokio::test]
+    async fn named_ignored_reference_read_preserves_task_scope_and_line_selection() {
+        let temp = tempfile::tempdir().unwrap();
+        let scope = restricted_scope(&temp);
+        std::fs::create_dir_all(temp.path().join("workspace/local")).unwrap();
+        std::fs::write(
+            temp.path().join(".gitignore"),
+            "workspace/local/\nprivate.md\n",
+        )
+        .unwrap();
+        std::fs::write(
+            temp.path().join("workspace/local/reference.md"),
+            "heading\nrelevant passage\nother\n",
+        )
+        .unwrap();
+        std::fs::write(temp.path().join("private.md"), "outside task").unwrap();
+        let reader = ReadFileTool { scope };
+        let result = reader
+            .read(&HashMap::from([
+                ("path".into(), json!("workspace/local/reference.md")),
+                ("line_start".into(), json!(2)),
+                ("line_end".into(), json!(2)),
+            ]))
+            .await
+            .unwrap();
+        assert_eq!(result["content"], "relevant passage");
+        let error = reader
+            .read(&HashMap::from([("path".into(), json!("private.md"))]))
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("packet scope"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn named_reference_reads_reject_symlink_escape_and_task_scope_bypass() {
+        use std::os::unix::fs::symlink;
+        let temp = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("workspace/local")).unwrap();
+        std::fs::write(outside.path().join("reference.md"), "outside root").unwrap();
+        std::fs::write(temp.path().join("private.md"), "outside task").unwrap();
+        symlink(outside.path(), temp.path().join("workspace/local/external")).unwrap();
+        symlink(
+            temp.path().join("private.md"),
+            temp.path().join("workspace/local/private.md"),
+        )
+        .unwrap();
+        let reader = ReadFileTool {
+            scope: scope(&temp),
+        };
+        let error = reader
+            .read(&HashMap::from([(
+                "path".into(),
+                json!("workspace/local/external/reference.md"),
+            )]))
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("escapes the tool scope"));
+        let reader = ReadFileTool {
+            scope: restricted_scope(&temp),
+        };
+        let error = reader
+            .read(&HashMap::from([(
+                "path".into(),
+                json!("workspace/local/private.md"),
+            )]))
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("packet scope"));
     }
 
     #[test]
