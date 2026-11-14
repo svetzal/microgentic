@@ -63,7 +63,8 @@ microgentic setup --apply
 microgentic
 ```
 
-Provider setup needs a running oMLX or Ollama server when you send a request.
+Provider setup needs a running oMLX, Ollama, vLLM, or LM Studio server when you
+send a request.
 Setup itself makes no provider request. `mg` remains an optional user-defined alias.
 The compatibility executable preserves the old launch form for benchmark consumers.
 

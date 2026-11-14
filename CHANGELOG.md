@@ -10,6 +10,8 @@ The release workflow publishes each version's section as its GitHub release note
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-14
+
 ### Added
 
 - vLLM and LM Studio providers. Choose one with `--provider vllm` or
@@ -443,7 +445,8 @@ experimental harness into a small terminal interface for everyday use.
 - A successful process exit still needs inspection of the native terminal
   result when classifying benchmark outcomes.
 
-[Unreleased]: https://github.com/svetzal/microgentic/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/svetzal/microgentic/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/svetzal/microgentic/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/svetzal/microgentic/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/svetzal/microgentic/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/svetzal/microgentic/compare/v0.6.0...v0.7.0
